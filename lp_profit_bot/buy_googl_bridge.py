@@ -33,6 +33,7 @@ USDC = bridge.SOL_USDC
 GOOGL = 'XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN'
 X1_GOOGL = s.GOOGL_MINT
 SOLANA_STOCK_MINTS = {
+    'aapl': 'XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp',
     'googl': GOOGL,
     'spy': 'XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W',
     'spcx': 'Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8',
@@ -48,6 +49,10 @@ ASSETS = {'googl': {'key': 'googl', 'symbol': 'GOOGL', 'sol_mint': GOOGL,
 ASSETS.update({key: {'key': key, 'symbol': stock.symbol.removesuffix('.X'),
                      'sol_mint': SOLANA_STOCK_MINTS[key], 'x1_mint': stock.mint}
                for key, stock in STOCKS.items()})
+ASSETS['aapl'] = {'key':'aapl', 'symbol':'AAPL',
+                  'sol_mint':SOLANA_STOCK_MINTS['aapl'],
+                  'x1_mint':'u7i4awutsHa9qcy6YdDQKfjER16i9fx4PRhG4ZqUXZ5',
+                  'escrow':'rUKQ9E2yWqTxDQ9DWBZtBha2REkS5G3KeUtA3uBFAFn'}
 TOKEN_2022 = s.TOKEN
 TOKEN_CLASSIC = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
 WSOL = 'So11111111111111111111111111111111111111112'
@@ -279,6 +284,8 @@ def build_bridge(amount_raw, source, token, asset=None):
     s.require(0 < seq < 2**64, 'Bridge sequence out of range')
     pda = lambda *parts: str(Pubkey.find_program_address(list(parts),pub(bridge.PROGRAM))[0])
     vault = pda(b'vault', bytes(pub(mint)))
+    if asset.get('escrow'):
+        s.require(vault == asset['escrow'], 'Stock bridge escrow changed')
     vault_ata = str(Pubkey.find_program_address([bytes(pub(vault)),bytes(pub(TOKEN_2022)),bytes(pub(mint))],pub(s.ATA))[0])
     keys = [pda(b'config'),pda(b'token_registry',bytes(pub(mint))),
             pda(b'evt_out',struct.pack('<Q',seq)),s.WALLET,

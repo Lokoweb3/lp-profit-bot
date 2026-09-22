@@ -59,7 +59,7 @@ are appended to `state/auto-bridge.log`.
 ### Solana stock purchase and bridge to X1
 
 `python3 -m lp_profit_bot.buy_stock_bridge` previews GOOGL by default. Add
-`--stock spy`, `spcx`, `tsla`, `meta`, `coin`, `pltr`, `amd`, or `nvda` to select
+`--stock aapl`, `spy`, `spcx`, `tsla`, `meta`, `coin`, `pltr`, `amd`, or `nvda` to select
 another supported stock. For example:
 
 ```bash
@@ -105,6 +105,15 @@ These mocked tests verify the application paths; a current Jupiter quote and a
 completed live bridge still depend on external services and wallet balances.
 The previous `buy_googl_bridge` module remains available and accepts the same
 options.
+
+AAPL buy-and-bridge uses Solana mint
+`XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp`, X1 mint
+`u7i4awutsHa9qcy6YdDQKfjER16i9fx4PRhG4ZqUXZ5`, and bridge-program escrow
+`rUKQ9E2yWqTxDQ9DWBZtBha2REkS5G3KeUtA3uBFAFn`. The code derives the escrow
+from the bridge program and Solana mint and rejects the transaction if it no
+longer matches. AAPL is currently available in the Solana → X1 purchase panel;
+automatic AAPL.X selling and X1 spot monitoring require an authorized X1/XNT
+pool address and are not enabled.
 
 The **Actual proceeds history** lists every journaled stock sale and XNT conversion using finalized on-chain receipts. It shows actual input, net native XNT received, actual USDC.X received, network fees, and other native costs such as rent. Pending or unverifiable receipts show blank amounts. XNT received is already net of network fees. Conversion output is reported separately because manual conversions may include unrelated wallet funds or combine sales. These receipts are proceeds, not cost-basis profit. Historical receipts are cached separately in `state/proceeds-history.json`; updating this history never signs, submits, or changes trading journals.
 

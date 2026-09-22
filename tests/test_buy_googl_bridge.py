@@ -69,6 +69,19 @@ class BuyGooglBridgeTests(unittest.TestCase):
             with self.assertRaises(flow.s.SellerError):
                 flow.bridge_token(flow.ASSETS['spy'])
 
+    def test_aapl_route_uses_authorized_mints_and_program_escrow(self):
+        asset=flow.ASSETS['aapl']
+        self.assertEqual(asset['sol_mint'],'XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp')
+        self.assertEqual(asset['x1_mint'],'u7i4awutsHa9qcy6YdDQKfjER16i9fx4PRhG4ZqUXZ5')
+        escrow=str(flow.Pubkey.find_program_address(
+            [b'vault',bytes(flow.Pubkey.from_string(asset['sol_mint']))],
+            flow.Pubkey.from_string(flow.bridge.PROGRAM))[0])
+        self.assertEqual(asset['escrow'],escrow)
+        changed=dict(asset,escrow='11111111111111111111111111111111')
+        with patch.object(flow.bridge,'solana_rpc',return_value=1):
+            with self.assertRaisesRegex(flow.s.SellerError,'escrow changed'):
+                flow.build_bridge(3_000_000,{'config':{}},{},changed)
+
     def test_selected_stock_quote_must_clear_its_bridge_minimum(self):
         asset = flow.ASSETS['tsla']
         response = {'inputMint': flow.USDC, 'outputMint': asset['sol_mint'],
