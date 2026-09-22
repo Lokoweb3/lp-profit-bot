@@ -7,7 +7,7 @@ from . import comparison
 from .ninja import NinjaError
 
 CACHE = Path(__file__).resolve().parents[1]/'state'/'stock-reference-cache.json'
-IDS = ('sp500-xstock', 'spacex-xstocks', 'tesla-xstock', 'meta-xstock', 'coinbase-xstock', 'palantir-xstock', 'amd-xstock', 'nvidia-xstock')
+IDS = ('apple-xstock', 'sp500-xstock', 'spacex-xstocks', 'tesla-xstock', 'meta-xstock', 'coinbase-xstock', 'palantir-xstock', 'amd-xstock', 'nvidia-xstock')
 
 
 def fetch_reference(coin_id):

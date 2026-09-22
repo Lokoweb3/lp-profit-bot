@@ -4,6 +4,7 @@ from .coin_monitor import snapshot as coin_snapshot
 from .pltr_monitor import snapshot as pltr_snapshot
 from .amd_monitor import snapshot as amd_snapshot
 from .nvda_monitor import snapshot as nvda_snapshot
+from .aapl_monitor import snapshot as aapl_snapshot
 
 import argparse
 import fcntl
@@ -429,6 +430,8 @@ class DashboardData:
         self.amd_error = None
         self.nvda = None
         self.nvda_error = None
+        self.aapl = None
+        self.aapl_error = None
         self.tsla = None
         self.tsla_error = None
         self.spcx = None
@@ -569,6 +572,18 @@ class DashboardData:
                     self.nvda_error = 'NVDA.X refresh failed. Previous values may be stale.'
             self.stop.wait(60)
 
+    def poll_aapl(self):
+        while not self.stop.is_set():
+            try:
+                value = aapl_snapshot()
+                with self.lock:
+                    self.aapl = value
+                    self.aapl_error = None
+            except Exception:
+                with self.lock:
+                    self.aapl_error = 'AAPL.X refresh failed. Previous values may be stale.'
+            self.stop.wait(60)
+
     def poll_spy(self):
         while not self.stop.is_set():
             self.refresh_spy()
@@ -598,8 +613,10 @@ class DashboardData:
         data["amd_error"] = self.amd_error
         data["nvda"] = dict(self.nvda) if self.nvda else None
         data["nvda_error"] = self.nvda_error
+        data["aapl"] = dict(self.aapl) if self.aapl else None
+        data["aapl_error"] = self.aapl_error
         now = time.time()
-        for key in ('spy', 'spcx', 'tsla', 'meta', 'coin', 'pltr', 'amd', 'nvda'):
+        for key in ('spy', 'spcx', 'tsla', 'meta', 'coin', 'pltr', 'amd', 'nvda', 'aapl'):
             market = data[key]
             if market:
                 market['fresh'] = bool(not data[key+'_error'] and 0 <= now-market['fetched_at'] <= 120
@@ -1046,6 +1063,7 @@ def main():
     threading.Thread(target=data.poll_pltr, daemon=True).start()
     threading.Thread(target=data.poll_amd, daemon=True).start()
     threading.Thread(target=data.poll_nvda, daemon=True).start()
+    threading.Thread(target=data.poll_aapl, daemon=True).start()
     print(f"Dashboard: http://localhost:{args.port}", flush=True)
     try:
         server.serve_forever()

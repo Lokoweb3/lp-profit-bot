@@ -111,9 +111,10 @@ AAPL buy-and-bridge uses Solana mint
 `u7i4awutsHa9qcy6YdDQKfjER16i9fx4PRhG4ZqUXZ5`, and bridge-program escrow
 `rUKQ9E2yWqTxDQ9DWBZtBha2REkS5G3KeUtA3uBFAFn`. The code derives the escrow
 from the bridge program and Solana mint and rejects the transaction if it no
-longer matches. AAPL is currently available in the Solana → X1 purchase panel;
-automatic AAPL.X selling and X1 spot monitoring require an authorized X1/XNT
-pool address and are not enabled.
+longer matches. The dashboard monitors AAPL.X balance, X1/XNT pool
+`4uX1ZyDNVAjpozzsuGMcaHJeSXfpB1TGrckHUkNkB2TX`, CoinGecko reference price,
+spot premium, liquidity, and estimated USD value. Automatic AAPL.X selling is
+not enabled because it has not been added to the approved stock-sale policy.
 
 The **Actual proceeds history** lists every journaled stock sale and XNT conversion using finalized on-chain receipts. It shows actual input, net native XNT received, actual USDC.X received, network fees, and other native costs such as rent. Pending or unverifiable receipts show blank amounts. XNT received is already net of network fees. Conversion output is reported separately because manual conversions may include unrelated wallet funds or combine sales. These receipts are proceeds, not cost-basis profit. Historical receipts are cached separately in `state/proceeds-history.json`; updating this history never signs, submits, or changes trading journals.
 

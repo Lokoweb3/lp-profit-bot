@@ -24,7 +24,7 @@ def fetch_reference(coin_id="alphabet-xstock") -> dict:
 
 def fetch_reference_batch(coin_ids) -> dict:
     for coin_id in coin_ids:
-        if coin_id not in ("alphabet-xstock", "sp500-xstock", "spacex-xstocks", "tesla-xstock", 'meta-xstock', 'coinbase-xstock', 'palantir-xstock', 'amd-xstock', 'nvidia-xstock'):
+        if coin_id not in ("alphabet-xstock", "apple-xstock", "sp500-xstock", "spacex-xstocks", "tesla-xstock", 'meta-xstock', 'coinbase-xstock', 'palantir-xstock', 'amd-xstock', 'nvidia-xstock'):
             raise ValueError("Unsupported reference asset")
     url = REFERENCE_URL.replace("alphabet-xstock", ','.join(coin_ids))
     headers = {"Accept": "application/json", "User-Agent": "lp-profit-bot/0.1"}
