@@ -84,6 +84,15 @@ for Solana finality, bridges the purchased tokens, and verifies the X1 receipt.
 The panel shows journal state and transaction links. If tracking stops while a
 transaction is pending, preview that same stock again to check and continue its
 recorded stage; do not assume the first transaction failed.
+Its purchase timeline lists each attempt from Solana submission and finality
+through bridge submission, bridge finality, and the verified X1 receipt, with
+receipt links. New journal entries record when each stage was observed; older
+entries show "Time not recorded" where a stage timestamp is unavailable. A
+warning identifies the affected stock and last confirmed step if a transaction
+fails, the background tracker stops, or a pending stage exceeds a display
+threshold. Preview errors and completed transfers are announced through accessible
+status messages. These alerts are informational; they never retry or submit a
+transaction automatically.
 The purchase flow has isolated tests for supported stock routes, bridge minimums,
 repeat purchases, pending-stage tracking, and the dashboard preview/confirmation
 endpoints. Run them without signing or broadcasting a transaction with:

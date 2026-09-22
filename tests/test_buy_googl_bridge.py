@@ -205,6 +205,39 @@ class BuyGooglBridgeTests(unittest.TestCase):
         self.assertEqual(cycle.call_count, 2)
         self.assertEqual(sleep.call_count, 1)
 
+    def test_finalized_purchase_records_observation_time_without_signing(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(flow.s, 'ROOT', Path(root)):
+            asset=flow.ASSETS['spy']
+            row=flow.new_attempt(asset,11_000_000)
+            row.update(stage='swap_pending',swap_signature=str(flow.Signature.default()),created_at=100)
+            flow.write_attempt(asset,row)
+            token={'minAmount':'2000000','maxAmount':'4000000','dailyCapRemaining':'4000000'}
+            with patch.object(flow.bridge,'solana_rpc',return_value={'value':[{'confirmationStatus':'finalized','err':None}]}), \
+                 patch.object(flow,'transaction_receipt',side_effect=[3_000_000,-11_000_000]), \
+                 patch.object(flow,'bridge_token',return_value=({},token)), \
+                 patch.object(flow,'owner_balance',return_value=3_000_000), \
+                 patch.object(flow,'signer') as signer, \
+                 patch.object(flow.time,'time',return_value=456):
+                self.assertEqual(flow.cycle(False,'spy')['status'],'BRIDGE_READY')
+            self.assertEqual(flow.read_journal(asset)['swap_finalized_at'],456)
+            signer.assert_not_called()
+
+    def test_finalized_bridge_records_time_while_x1_receipt_pending(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(flow.s, 'ROOT', Path(root)):
+            asset=flow.ASSETS['spy']
+            row=flow.new_attempt(asset,11_000_000)
+            row.update(stage='bridge_pending',swap_signature=str(flow.Signature.default()),
+                       bridge_signature=str(flow.Signature.default()),bought_raw=3_000_000,
+                       bridge_amount_raw=3_000_000,created_at=100)
+            flow.write_attempt(asset,row)
+            with patch.object(flow.bridge,'solana_rpc',return_value={'value':[{'confirmationStatus':'finalized','err':None}]}), \
+                 patch.object(flow.bridge,'api',return_value={'transaction':{'status':'pending'}}), \
+                 patch.object(flow,'signer') as signer, \
+                 patch.object(flow.time,'time',return_value=789):
+                self.assertEqual(flow.cycle(False,'spy')['status'],'WAITING_FOR_X1_RECEIPT')
+            self.assertEqual(flow.read_journal(asset)['bridge_finalized_at'],789)
+            signer.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

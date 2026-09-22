@@ -42,7 +42,7 @@ function render(data) {
   renderTimeline(data.activity,data.now,data.auto_bridge);
   renderProceeds(data.proceeds,data.now);
   renderBridge(data.auto_bridge);
-  renderStockPurchase(data.stock_purchase);
+  renderStockPurchase(data.stock_purchase,data.now);
   renderOverview(data);
   renderRecent(data);
   renderPreview(data);
@@ -209,7 +209,7 @@ function render(data) {
 }
 async function refresh(schedule=true){
   try {const response=await fetch('/api/status',{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!response.ok)throw Error('status');const data=await response.json();sessionReady=true;render(data);}
-  catch { for(const id of ['spy-value','spcx-value','tsla-value','meta-value','coin-value','pltr-value','amd-value','nvda-value','googl-strategy-value','googl-wallet-value','remaining-value','usdc-value'])$(id).textContent='Estimated value: —';previewFingerprint='';$('overview-cards').replaceChildren(); for(const key of ['meta','coin','pltr','amd','nvda']){badge(key+'-status','Disconnected','bad');$(key+'-gap').textContent='—';} badge('proceeds-status','Disconnected','bad'); badge('bridge-status','Disconnected','bad'); badge('settlement-status','Disconnected','bad'); badge('googl-strategy-status','Disconnected','bad'); badge('timeline-status','Disconnected','bad'); badge('rail-automation-status','Disconnected','bad'); $('proceeds-metric-note').textContent='Last known receipts · dashboard disconnected';$('strategy-count-note').textContent='Last known script count · dashboard disconnected';$('usdc-note').textContent='Last known wallet balance · dashboard disconnected';$('recent-empty').textContent='Dashboard disconnected; recent activity may be stale.'; for(const key of ['spcx','tsla','meta','coin','pltr','amd','nvda'])$('start-'+key+'-seller').disabled=true; badge('tsla-status','Disconnected','bad'); $('tsla-gap').textContent='—'; badge('spcx-status','Disconnected','bad'); $('spcx-gap').textContent='—'; $('start-auto-convert').disabled=true; badge('terminal-status','Disconnected','bad'); for(const key of ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda']){$('stop-'+key).disabled=true;badge('worker-'+key+'-badge','Unknown','warn');} $('stop-all').disabled=true; badge('auto-convert-badge','Disconnected','bad'); $('start-spy-seller').disabled=true; badge('spy-status','Disconnected','bad'); $('spy-gap').textContent='—'; $('start-seller').disabled=true; sessionReady=false; $('connection').textContent='Dashboard disconnected'; $('errors').hidden=false; $('errors').textContent='Connection lost. Displayed values may be out of date.';badge('freshness','Disconnected','bad');badge('engine-badge','Status unknown','warn'); }
+  catch { purchaseMessage('Dashboard disconnected. Purchase status may be stale.',true);$('stock-purchase-alerts').textContent='Cannot check purchase or bridge progress while the dashboard is disconnected.';$('stock-purchase-alerts').hidden=false; for(const id of ['spy-value','spcx-value','tsla-value','meta-value','coin-value','pltr-value','amd-value','nvda-value','googl-strategy-value','googl-wallet-value','remaining-value','usdc-value'])$(id).textContent='Estimated value: —';previewFingerprint='';$('overview-cards').replaceChildren(); for(const key of ['meta','coin','pltr','amd','nvda']){badge(key+'-status','Disconnected','bad');$(key+'-gap').textContent='—';} badge('proceeds-status','Disconnected','bad'); badge('bridge-status','Disconnected','bad'); badge('settlement-status','Disconnected','bad'); badge('googl-strategy-status','Disconnected','bad'); badge('timeline-status','Disconnected','bad'); badge('rail-automation-status','Disconnected','bad'); $('proceeds-metric-note').textContent='Last known receipts · dashboard disconnected';$('strategy-count-note').textContent='Last known script count · dashboard disconnected';$('usdc-note').textContent='Last known wallet balance · dashboard disconnected';$('recent-empty').textContent='Dashboard disconnected; recent activity may be stale.'; for(const key of ['spcx','tsla','meta','coin','pltr','amd','nvda'])$('start-'+key+'-seller').disabled=true; badge('tsla-status','Disconnected','bad'); $('tsla-gap').textContent='—'; badge('spcx-status','Disconnected','bad'); $('spcx-gap').textContent='—'; $('start-auto-convert').disabled=true; badge('terminal-status','Disconnected','bad'); for(const key of ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda']){$('stop-'+key).disabled=true;badge('worker-'+key+'-badge','Unknown','warn');} $('stop-all').disabled=true; badge('auto-convert-badge','Disconnected','bad'); $('start-spy-seller').disabled=true; badge('spy-status','Disconnected','bad'); $('spy-gap').textContent='—'; $('start-seller').disabled=true; sessionReady=false; $('connection').textContent='Dashboard disconnected'; $('errors').hidden=false; $('errors').textContent='Connection lost. Displayed values may be out of date.';badge('freshness','Disconnected','bad');badge('engine-badge','Status unknown','warn'); }
   if(!sessionReady)$('stock-purchase-confirm').disabled=true;
   if(schedule)setTimeout(refresh,5000);
 }
@@ -358,39 +358,102 @@ $('bridge-confirm').addEventListener('click',async()=>{
   finally{bridgeBusy=false;$('bridge-confirm').disabled=false;}
 });
 
-let stockPurchaseData=null,stockPurchaseQuote=null,stockPurchaseBusy=false,stockPurchaseTimer;
+let stockPurchaseData=null,stockPurchaseQuote=null,stockPurchaseBusy=false,stockPurchaseTimer,stockPurchaseNow=0;
+const announcedPurchaseStages=new Map();
+const purchaseStages={new:'Not started',swap_pending:'Solana purchase pending',swap_finalized:'Purchase finalized · bridge ready',bridge_pending:'Solana bridge pending',completed:'Received on X1',failed:'Failed · review journal',unavailable:'Journal unavailable'};
+const purchaseClock=value=>Number.isFinite(Number(value))&&Number(value)>0?new Date(Number(value)*1000).toLocaleString():'Time not recorded';
+function purchaseMessage(message,error=false){
+  $('stock-purchase-result').textContent=error?'':message;
+  $('stock-purchase-error').textContent=error?message:'';
+}
+function purchaseLastVerified(attempt){
+  if(attempt?.destination_signature&&attempt.stage==='completed')return 'X1 receipt verified';
+  if(attempt?.bridge_finalized_at)return 'Solana bridge finalized';
+  if(attempt?.swap_finalized_at||attempt?.bridge_signature||['swap_finalized','bridge_pending','completed'].includes(attempt?.stage))return 'Solana purchase finalized';
+  return 'No finalized step recorded';
+}
+function renderPurchaseAlerts(data,now){
+  const messages=[];
+  for(const [key,row] of Object.entries(data||{})){
+    if(key==='running'||!row||typeof row!=='object')continue;
+    const stage=row.stage,asset=row.asset||key.toUpperCase();
+    if(stage==='failed')messages.push(`${asset}: transaction failed. Last confirmed step: ${purchaseLastVerified(row)}. Review the journal and receipts.`);
+    if(stage==='unavailable')messages.push(`${asset}: purchase journal unavailable. Check the dashboard log.`);
+    if(!['swap_pending','swap_finalized','bridge_pending'].includes(stage))continue;
+    const since=stage==='swap_pending'?row.created_at:stage==='swap_finalized'?row.swap_finalized_at:row.bridge_finalized_at||row.bridge_submitted_at;
+    const limit=stage==='swap_pending'?600:stage==='swap_finalized'?300:row.bridge_finalized_at?1800:1200;
+    const overdue=Number.isFinite(Number(since))&&Number(since)>0&&now-Number(since)>limit;
+    if(data.running===false||overdue){
+      const reason=data.running===false?'background tracker stopped':`no progress for over ${Math.floor(limit/60)} minutes`;
+      messages.push(`${asset}: ${reason}. Last confirmed step: ${purchaseLastVerified(row)}. Check its receipt before retrying.`);
+    }
+  }
+  const content=messages.join(' ');
+  if($('stock-purchase-alerts').textContent!==content)$('stock-purchase-alerts').textContent=content;
+  $('stock-purchase-alerts').hidden=!content;
+}
+function renderPurchaseTimeline(row){
+  const container=$('stock-purchase-timeline');container.replaceChildren();
+  const history=row?.history||[];
+  if(!history.length){const empty=document.createElement('p');empty.className='muted';empty.textContent=row?.stage==='unavailable'?'Purchase history unavailable.':'No purchase recorded for this stock.';container.append(empty);return;}
+  for(const [index,attempt] of history.entries()){
+    const group=document.createElement('section');group.className='purchase-attempt';
+    const title=document.createElement('h4');title.textContent=`Purchase #${index+1}`+(attempt.stage==='failed'?' · failed':'');group.append(title);
+    const list=document.createElement('ol');list.className='purchase-steps';
+    const completed=attempt.stage==='completed';
+    const steps=[
+      ['Solana purchase submitted',Boolean(attempt.swap_signature),attempt.created_at,attempt.swap_signature,'https://solscan.io/tx/'],
+      ['Solana purchase finalized',Boolean(attempt.swap_finalized_at)||completed||['swap_finalized','bridge_pending'].includes(attempt.stage),attempt.swap_finalized_at,attempt.swap_signature,'https://solscan.io/tx/'],
+      ['Solana bridge submitted',Boolean(attempt.bridge_signature),attempt.bridge_submitted_at,attempt.bridge_signature,'https://solscan.io/tx/'],
+      ['Solana bridge finalized',Boolean(attempt.bridge_finalized_at)||completed,attempt.bridge_finalized_at,attempt.bridge_signature,'https://solscan.io/tx/'],
+      ['X1 receipt verified',completed&&Boolean(attempt.destination_signature),attempt.completed_at,attempt.destination_signature,'https://explorer.mainnet.x1.xyz/tx/']
+    ];
+    const firstPending=steps.findIndex(step=>!step[1]);
+    for(const [stepIndex,[label,done,stamp,signature,base]] of steps.entries()){
+      const item=document.createElement('li');item.className=done?'done':stepIndex===firstPending&&attempt.stage==='failed'?'failed':stepIndex===firstPending?'current':'future';
+      const heading=document.createElement('span');heading.className='purchase-step-name';heading.textContent=label;
+      const state=document.createElement('span');state.className='purchase-step-state';state.textContent=done?'Verified':stepIndex===firstPending&&attempt.stage==='failed'?'Failed':stepIndex===firstPending?'Waiting':'Not started';
+      item.append(heading,state);
+      if(done){const time=document.createElement('time');time.textContent=purchaseClock(stamp);if(Number(stamp)>0)time.dateTime=new Date(Number(stamp)*1000).toISOString();item.append(time);}
+      if(done&&signature){const link=document.createElement('a');link.href=base+encodeURIComponent(signature);link.textContent='View receipt ↗';link.target='_blank';link.rel='noopener noreferrer';item.append(link);}
+      list.append(item);
+    }
+    group.append(list);container.append(group);
+  }
+}
 function clearStockPurchaseQuote(){stockPurchaseQuote=null;clearTimeout(stockPurchaseTimer);$('stock-purchase-quote').hidden=true;$('stock-purchase-confirm').disabled=true;}
-function renderStockPurchase(data){
+function renderStockPurchase(data,now=stockPurchaseNow){
+  stockPurchaseNow=now;
   stockPurchaseData=data;
   const key=$('stock-purchase-stock').value, row=data?.[key],stage=row?.stage;
-  const labels={new:'Not started',swap_pending:'Solana purchase pending',swap_finalized:'Purchase finalized · bridge ready',bridge_pending:'Solana bridge pending',completed:'Received on X1',failed:'Failed · review journal',unavailable:'Journal unavailable'};
-  badge('stock-purchase-badge',labels[stage]||'Status unavailable',stage==='completed'?'good':stage==='new'?'':stage==='failed'||stage==='unavailable'?'bad':'warn');
-  $('stock-purchase-status').textContent=row?`${row.asset} · ${labels[stage]||'Unknown status'}`+(row.attempt_count?` · ${row.attempt_count} recorded purchase${row.attempt_count===1?'':'s'}`:'')+(data?.running===true?' · background tracker running':'')+(row.bought_raw!=null?` · purchased ${fmt(row.bought_raw/1e8,8)} ${row.asset}`:'')+(row.created_at?` · started ${new Date(row.created_at*1000).toLocaleString()}`:''):'Stock bridge status unavailable.';
+  const previousStage=announcedPurchaseStages.get(key);
+  if(previousStage!==stage){
+    if(stage==='completed')$('stock-purchase-announcement').textContent=`${row.asset} received on X1. Open the purchase timeline for the verified receipt.`;
+    else if(stage==='failed')$('stock-purchase-announcement').textContent=`${row.asset} purchase or bridge failed. Review the alert and recorded receipts.`;
+    announcedPurchaseStages.set(key,stage);
+  }
+  badge('stock-purchase-badge',purchaseStages[stage]||'Status unavailable',stage==='completed'?'good':stage==='new'?'':stage==='failed'||stage==='unavailable'?'bad':'warn');
+  $('stock-purchase-status').textContent=row?`${row.asset} · ${purchaseStages[stage]||'Unknown status'}`+(row.attempt_count?` · ${row.attempt_count} recorded purchase${row.attempt_count===1?'':'s'}`:'')+(data?.running===true?' · background tracker running':'')+(row.bought_raw!=null?` · purchased ${fmt(row.bought_raw/1e8,8)} ${row.asset}`:'')+(row.created_at?` · submitted ${purchaseClock(row.created_at)}`:''):'Stock bridge status unavailable.';
   $('stock-purchase-stock').disabled=stockPurchaseBusy;
   $('stock-purchase-amount').disabled=stockPurchaseBusy;
   $('stock-purchase-preview').disabled=stockPurchaseBusy||!row||data?.running!==false||stage==='failed'||stage==='unavailable';
   $('stock-purchase-preview').textContent=data?.running===true?'Bridge tracker running':stage==='completed'?'Preview another purchase':stage==='new'?'Preview purchase & bridge':'Check bridge status';
-  const links=$('stock-purchase-links');links.replaceChildren();
-  for(const [index,attempt] of (row?.history||[]).entries()){
-    for(const [signature,label,base] of [[attempt.swap_signature,'Solana purchase','https://solscan.io/tx/'],[attempt.bridge_signature,'Solana bridge','https://solscan.io/tx/'],[attempt.destination_signature,'X1 receipt','https://explorer.mainnet.x1.xyz/tx/']]){
-      if(!signature)continue;
-      const a=document.createElement('a');a.href=base+encodeURIComponent(signature);a.textContent=`#${index+1} ${label} ↗`;a.target='_blank';a.rel='noopener noreferrer';links.append(a);
-    }
-  }
+  renderPurchaseAlerts(data,now);
+  renderPurchaseTimeline(row);
 }
 async function stockPurchasePost(path,body){
   if(!sessionReady)throw Error('Dashboard disconnected. Wait for reconnection.');
   const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
   const result=await response.json();if(!response.ok)throw Error(result.message||'Stock purchase or bridge unavailable');return result;
 }
-$('stock-purchase-stock').addEventListener('change',()=>{clearStockPurchaseQuote();$('stock-purchase-result').textContent='';renderStockPurchase(stockPurchaseData);});
-$('stock-purchase-amount').addEventListener('input',()=>{clearStockPurchaseQuote();$('stock-purchase-result').textContent='';});
-$('stock-purchase-cancel').addEventListener('click',()=>{clearStockPurchaseQuote();$('stock-purchase-result').textContent='Preview cancelled.';});
+$('stock-purchase-stock').addEventListener('change',()=>{clearStockPurchaseQuote();purchaseMessage('');renderStockPurchase(stockPurchaseData);});
+$('stock-purchase-amount').addEventListener('input',()=>{clearStockPurchaseQuote();purchaseMessage('');});
+$('stock-purchase-cancel').addEventListener('click',()=>{clearStockPurchaseQuote();purchaseMessage('Preview cancelled.');});
 $('stock-purchase-form').addEventListener('submit',async event=>{
   event.preventDefault();if(stockPurchaseBusy)return;
-  if(!sessionReady){$('stock-purchase-result').textContent='Dashboard disconnected. Wait for reconnection.';return;}
+  if(!sessionReady){purchaseMessage('Dashboard disconnected. Wait for reconnection.',true);return;}
   clearStockPurchaseQuote();stockPurchaseBusy=true;$('stock-purchase-preview').disabled=true;$('stock-purchase-stock').disabled=true;$('stock-purchase-amount').disabled=true;
-  $('stock-purchase-result').textContent='Checking current Solana quote and X1 bridge route…';
+  purchaseMessage('Checking current Solana quote and X1 bridge route…');
   try{
     const result=await stockPurchasePost('/api/stock-purchase/preview',{stock:$('stock-purchase-stock').value,amount:$('stock-purchase-amount').value});
     if(result.quote_id){
@@ -399,25 +462,25 @@ $('stock-purchase-form').addEventListener('submit',async event=>{
       $('stock-purchase-quote-detail').textContent=detail;
       $('stock-purchase-confirm').textContent=result.status==='SWAP_READY'?`Confirm ${result.spend_usdc} USDC purchase & bridge`:result.status==='BRIDGE_READY'?'Confirm bridge to X1':'Continue tracking';
       $('stock-purchase-confirm').disabled=false;$('stock-purchase-quote').hidden=false;
-      $('stock-purchase-result').textContent='Review and confirm within 30 seconds.';
-      stockPurchaseTimer=setTimeout(()=>{clearStockPurchaseQuote();$('stock-purchase-result').textContent='Preview expired. Preview again.';},Math.max(0,(result.expires_at-Date.now()/1000)*1000));
-    }else{$('stock-purchase-result').textContent='This stock purchase and bridge is complete.';}
+      purchaseMessage('Review and confirm within 30 seconds.');
+      stockPurchaseTimer=setTimeout(()=>{clearStockPurchaseQuote();purchaseMessage('Preview expired. Preview again.',true);},Math.max(0,(result.expires_at-Date.now()/1000)*1000));
+    }else{purchaseMessage('This stock purchase and bridge is complete.');}
     await refresh(false);
-  }catch(error){$('stock-purchase-result').textContent=error.message;}
+  }catch(error){purchaseMessage(error.message,true);}
   finally{stockPurchaseBusy=false;renderStockPurchase(stockPurchaseData);}
 });
 $('stock-purchase-confirm').addEventListener('click',async()=>{
   if(stockPurchaseBusy||!stockPurchaseQuote)return;
   const quote=stockPurchaseQuote;clearStockPurchaseQuote();stockPurchaseBusy=true;$('stock-purchase-preview').disabled=true;$('stock-purchase-stock').disabled=true;$('stock-purchase-amount').disabled=true;
-  $('stock-purchase-result').textContent=quote.status==='SWAP_READY'?'Submitting confirmed Solana purchase; do not retry until its status is known.':'Checking and continuing the confirmed bridge.';
+  purchaseMessage(quote.status==='SWAP_READY'?'Submitting confirmed Solana purchase; do not retry until its status is known.':'Checking and continuing the confirmed bridge.');
   try{
     const result=await stockPurchasePost('/api/stock-purchase/confirm',{quote_id:quote.quote_id});
-    $('stock-purchase-result').textContent=`${result.status.replaceAll('_',' ').toLowerCase()}. `+(result.tracking_started===false?'Automatic tracking could not start. Check the journal before retrying.':result.tracking_started?'Finality and X1 bridge tracking started.':'Check transaction status below.');
+    purchaseMessage(`${result.status.replaceAll('_',' ').toLowerCase()}. `+(result.tracking_started===false?'Automatic tracking could not start. Check the journal before retrying.':result.tracking_started?'Finality and X1 bridge tracking started.':'Check transaction status below.'),result.tracking_started===false);
     await refresh(false);
   }catch(error){
-    $('stock-purchase-result').textContent=error.message.includes('Current protected output is below the confirmed preview')
+    purchaseMessage(error.message.includes('Current protected output is below the confirmed preview')
       ? 'The quote moved below your confirmed minimum. No purchase was sent. Preview again for a fresh quote.'
-      : error.message+' Check the recorded transaction status before previewing again.';
+      : error.message+' Check the recorded transaction status before previewing again.',true);
     await refresh(false);
   }
   finally{stockPurchaseBusy=false;renderStockPurchase(stockPurchaseData);}

@@ -787,9 +787,16 @@ class DashboardData:
                     'bought_raw': row.get('bought_raw'),
                     'bridge_amount_raw': row.get('bridge_amount_raw'),
                     'created_at': row.get('created_at'),
+                    'swap_finalized_at': row.get('swap_finalized_at'),
+                    'bridge_submitted_at': row.get('bridge_submitted_at'),
+                    'bridge_finalized_at': row.get('bridge_finalized_at'),
+                    'completed_at': row.get('completed_at'),
+                    'failed_at': row.get('failed_at'),
                     'history': [{field: attempt.get(field) for field in
                         ('stage', 'spend_raw', 'swap_signature', 'bridge_signature',
-                         'destination_signature', 'created_at')} for attempt in attempts]}
+                         'destination_signature', 'created_at', 'swap_finalized_at',
+                         'bridge_submitted_at', 'bridge_finalized_at', 'completed_at',
+                         'failed_at')} for attempt in attempts]}
             except Exception:
                 data['stock_purchase'][key] = {'asset': asset['symbol'], 'stage': 'unavailable'}
         data['workers'] = worker_control.status()

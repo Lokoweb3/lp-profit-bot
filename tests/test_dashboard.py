@@ -45,6 +45,21 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(status['auto_bridge']['entries'][0]['destination_signature'],'soltx')
         self.assertNotIn('NEVER_RETURN',json.dumps(status))
 
+    def test_stock_purchase_status_exposes_stage_times_without_private_fields(self):
+        from lp_profit_bot import buy_googl_bridge as flow
+        row={'stage':'completed','spend_raw':11_000_000,'swap_signature':'swap',
+             'bridge_signature':'bridge','destination_signature':'receipt','created_at':100,
+             'swap_finalized_at':110,'bridge_submitted_at':120,'bridge_finalized_at':130,
+             'completed_at':140,'private_key':'NEVER_RETURN'}
+        with patch.object(flow,'read_journal',return_value=row), \
+             patch.object(flow,'read_history',return_value=[row]), \
+             patch.object(d,'seller_running',return_value=False):
+            status=d.DashboardData().status()
+        purchase=status['stock_purchase']['spy']
+        self.assertEqual(purchase['bridge_finalized_at'],130)
+        self.assertEqual(purchase['history'][0]['completed_at'],140)
+        self.assertNotIn('NEVER_RETURN',json.dumps(status))
+
     def test_stale_reference_suppresses_gap(self):
         cache = d.DashboardData()
         cache.chain = {"pool_price": "400", "fetched_at": time.time()}

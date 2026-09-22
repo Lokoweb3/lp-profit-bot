@@ -347,14 +347,14 @@ def cycle(live=False, asset_key='googl', approved_minimum_raw=None,
         if status is None or status.get('confirmationStatus') != 'finalized':
             return {'status':'SWAP_PENDING','signature':row['swap_signature']}
         if status['err'] is not None:
-            row['stage']='failed';write_attempt(asset,row)
+            row.update(stage='failed',failed_at=time.time());write_attempt(asset,row)
             raise s.SellerError('Swap failed; journal preserved')
         amount = transaction_receipt(row['swap_signature'],asset['sol_mint'])
         spent = transaction_receipt(row['swap_signature'],USDC)
         source, token = bridge_token(asset)
         s.require(amount is not None and amount >= int(token['minAmount']) and
                   spent == -row['spend_raw'], 'Swap receipt failed amount verification')
-        row.update(stage='swap_finalized',bought_raw=amount)
+        row.update(stage='swap_finalized',bought_raw=amount,swap_finalized_at=time.time())
         write_attempt(asset,row)
     if row['stage'] == 'swap_finalized':
         source, token = bridge_token(asset)
@@ -378,7 +378,7 @@ def cycle(live=False, asset_key='googl', approved_minimum_raw=None,
                   'Stock bridge simulation debit or cost mismatch')
         signed = VersionedTransaction(unsigned.message,[signer()])
         row.update(stage='bridge_pending',bridge_signature=str(signed.signatures[0]),
-                   bridge_amount_raw=amount)
+                   bridge_amount_raw=amount,bridge_submitted_at=time.time())
         write_attempt(asset,row)
         returned = bridge.solana_rpc('sendTransaction',[base64.b64encode(bytes(signed)).decode(),
                     {'encoding':'base64','skipPreflight':False,'preflightCommitment':'confirmed','maxRetries':0}])
@@ -390,8 +390,11 @@ def cycle(live=False, asset_key='googl', approved_minimum_raw=None,
         if status is None or status.get('confirmationStatus') != 'finalized':
             return {'status':'BRIDGE_PENDING','signature':row['bridge_signature']}
         if status['err'] is not None:
-            row['stage']='failed';write_attempt(asset,row)
+            row.update(stage='failed',failed_at=time.time());write_attempt(asset,row)
             raise s.SellerError('Bridge source failed; journal preserved')
+        if 'bridge_finalized_at' not in row:
+            row['bridge_finalized_at']=time.time()
+            write_attempt(asset,row)
         try:
             result = bridge.api('/transactions/'+row['bridge_signature'])
         except urllib.error.HTTPError as exc:
@@ -413,7 +416,7 @@ def cycle(live=False, asset_key='googl', approved_minimum_raw=None,
         minimum = row['bridge_amount_raw']*9975//10000
         s.require(token_balance('postTokenBalances')-token_balance('preTokenBalances')>=minimum,
                   'X1 stock receipt below bridge fee minimum')
-        row.update(stage='completed',destination_signature=tx['destTxSig'])
+        row.update(stage='completed',destination_signature=tx['destTxSig'],completed_at=time.time())
         write_attempt(asset,row)
         return {'status':'COMPLETED','swap_signature':row['swap_signature'],
                 'bridge_signature':row['bridge_signature'],'destination_signature':tx['destTxSig']}
