@@ -1,0 +1,21 @@
+{
+  "target_percent": "10",
+  "positions": [
+    {
+      "position_id": "demo-target-reached",
+      "contributed_usd": "1000",
+      "principal_value_usd": "1080",
+      "unclaimed_fees_usd": "35",
+      "withdrawn_usd": "0",
+      "estimated_exit_cost_usd": "5"
+    },
+    {
+      "position_id": "demo-hold",
+      "contributed_usd": "1000",
+      "principal_value_usd": "950",
+      "unclaimed_fees_usd": "20",
+      "withdrawn_usd": "0",
+      "estimated_exit_cost_usd": "5"
+    }
+  ]
+}

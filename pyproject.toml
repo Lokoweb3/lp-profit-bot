@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lp-profit-bot"
+version = "0.1.0"
+description = "Simulation-first liquidity position profit monitor for the X1 blockchain"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+wallet = ["cryptography>=41"]
+trading = ["cryptography>=41", "solders>=0.27,<0.28"]
+
+[project.scripts]
+lp-profit-bot = "lp_profit_bot.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["lp_profit_bot*"]
+
+[tool.setuptools.package-data]
+lp_profit_bot = ["dashboard_assets/*"]
