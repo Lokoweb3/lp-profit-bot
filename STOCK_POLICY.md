@@ -5,6 +5,7 @@ from the keypair in `.secrets/bot-wallet.json` and is not stored in this policy.
 
 | Token | Approved mint |
 |---|---|
+| AAPL.X | `u7i4awutsHa9qcy6YdDQKfjER16i9fx4PRhG4ZqUXZ5` |
 | SPY.X | `5Z7K1BaM36ubfNHkXbiDm5GW3KGzVSt3DFxD2b7p4VtJ` |
 | SPCX.X | `CCqoyVud4QNCccV9EJtWEFPaC6jBaGJsaFTnyD8Ss47m` |
 | TSLA.X | `47wNUaHJyuiknQswU5qsfYKjaZ9ijueRB63ZrsxuRb4F` |

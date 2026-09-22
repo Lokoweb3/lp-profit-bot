@@ -14,6 +14,8 @@ class Stock:
     reference: str
 
 STOCKS = {
+    'aapl': Stock('aapl', 'AAPL.X', 'u7i4awutsHa9qcy6YdDQKfjER16i9fx4PRhG4ZqUXZ5',
+                  '4uX1ZyDNVAjpozzsuGMcaHJeSXfpB1TGrckHUkNkB2TX', 'apple-xstock'),
     'spy': Stock('spy', 'SPY.X', '5Z7K1BaM36ubfNHkXbiDm5GW3KGzVSt3DFxD2b7p4VtJ',
                  'C7wzNxd8pa2roCidoP9WcZdnDPRV4TyAyqiotZQzrTFr', 'sp500-xstock'),
     'spcx': Stock('spcx', 'SPCX.X', 'CCqoyVud4QNCccV9EJtWEFPaC6jBaGJsaFTnyD8Ss47m',

@@ -1,5 +1,5 @@
 """Read-only actual proceeds, verified from finalized transaction receipts."""
-from . import meta_seller, coin_seller, pltr_seller, amd_seller, nvda_seller
+from . import meta_seller, coin_seller, pltr_seller, amd_seller, nvda_seller, aapl_seller
 import json
 import threading
 import time
@@ -83,6 +83,7 @@ class ProceedsHistory:
                  ('PLTR.X',STOCKS['pltr'].mint,pltr_seller.read_journal),
                  ('AMD.X',STOCKS['amd'].mint,amd_seller.read_journal),
                  ('NVDA.X',STOCKS['nvda'].mint,nvda_seller.read_journal),
+                 ('AAPL.X',STOCKS['aapl'].mint,aapl_seller.read_journal),
                  ('XNT',seller.WXNT,xnt_conversion.read_journal)]
         for asset,mint,reader in sources:
             try:entries=reader()['entries']

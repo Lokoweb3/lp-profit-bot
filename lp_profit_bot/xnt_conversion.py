@@ -42,10 +42,10 @@ def ready():
 
 
 def stock_sales_ready():
-    from . import spcx_seller, tsla_seller, meta_seller, coin_seller, pltr_seller, amd_seller, nvda_seller
+    from . import spcx_seller, tsla_seller, meta_seller, coin_seller, pltr_seller, amd_seller, nvda_seller, aapl_seller
     if not reconcile_spy(spy_journal()):
         return False
-    for module in (spcx_seller,tsla_seller,meta_seller,coin_seller,pltr_seller,amd_seller,nvda_seller):
+    for module in (spcx_seller,tsla_seller,meta_seller,coin_seller,pltr_seller,amd_seller,nvda_seller,aapl_seller):
         if not module.reconcile(module.read_journal()):
             return False
     return True

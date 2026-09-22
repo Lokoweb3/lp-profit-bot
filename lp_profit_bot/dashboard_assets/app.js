@@ -47,20 +47,20 @@ function render(data) {
   renderRecent(data);
   renderPreview(data);
   const workers=data.workers || {};
-  const saleKeys=['googl','spy','spcx','tsla','meta','coin','pltr','amd','nvda'];
+  const saleKeys=['googl','spy','spcx','tsla','meta','coin','pltr','amd','nvda','aapl'];
   const active=saleKeys.filter(key=>workers[key]?.running===true&&workers[key]?.mode==='live').length;
   liveValue('active-strategies',String(active));
   $('strategy-count-note').textContent=active+' of '+saleKeys.length+' sale scripts live'+(saleKeys.some(key=>workers[key]?.running===true&&workers[key]?.mode==='simulation')?' · simulation also running':'')+(saleKeys.some(key=>workers[key]?.running==null)?' · some status unknown':'');
   badge('rail-automation-status',active+' live sale strateg'+(active===1?'y':'ies'),active?'good':'warn');
   const descriptions={WAITING_FOR_REFERENCE:'Reference provider unavailable; retrying in 60 seconds',HOLD:'Waiting for a sale above the reference after costs',CHECKING:'Checking prices and balances',WAITING_FOR_PROCEEDS:'Waiting for eligible stock sale proceeds',KEEPING_XNT_RESERVE:'Waiting to preserve the XNT fee reserve',WAITING_FOR_FINALITY:'Waiting for transaction confirmation',WAITING_FOR_CONVERSION_FINALITY:'Waiting for conversion confirmation',WAITING_FOR_BRIDGE_FINALITY:'Waiting for X1 and Solana bridge confirmation',RETRYING_BRIDGE_API:'Bridge API unavailable; retrying in 30 seconds',WAITING_FOR_SPY_FINALITY:'Waiting for SPY.X sale confirmation',SUBMITTED_PENDING_FINALITY:'Transaction submitted; awaiting confirmation',WAITING_FOR_NATIVE_SWAP:'Waiting for another swap',WAITING_FOR_XNT_CONVERSION:'Waiting for XNT conversion'};
-  for(const key of ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda']){
+  for(const key of ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda','aapl']){
     const worker=workers[key];const running=worker?.running;
     badge('worker-'+key+'-badge',running===true?'Running':running===false?'Stopped':'Unknown',running===true?'good':running===false?'':'warn');
     const stoppedReason='No script running';
     $('worker-'+key+'-detail').textContent=running===true?(worker.mode==='live'?'Live · ':worker.mode==='simulation'?'Simulation · ':'')+(descriptions[worker.activity] || 'Script active; waiting for activity update'):running===false?stoppedReason:'Cannot determine process status';
     $('stop-'+key).disabled=stopBusy || !sessionReady || running===false;
   }
-  $('stop-all').disabled=stopBusy || !sessionReady || ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda'].every(key=>workers[key]?.running===false);
+  $('stop-all').disabled=stopBusy || !sessionReady || ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda','aapl'].every(key=>workers[key]?.running===false);
 
   const auto=data.auto_conversion;
   $('start-auto-convert').disabled=autoStarting || !sessionReady || !auto || auto.running!==false;
@@ -78,7 +78,7 @@ function render(data) {
   $('start-spy-seller').disabled=spyStarting || !sessionReady || !ss || ss.running!==false || ss.halted;
   $('start-spy-seller').textContent=spyStarting?'Starting SPY.X seller…':ss?.running?'SPY.X → XNT · Running':ss?.halted?'SPY.X seller halted':'Sell SPY.X → XNT';
   $('spy-seller-state').textContent=ss ? 'SPY.X seller '+(ss.halted?'halted':ss.running?'running':'stopped')+' · confirmed sold '+fmt(ss.confirmed,8)+' · no sale amount caps'+(ss.status?' · '+ss.status.replaceAll('_',' ').toLowerCase():'') : 'SPY.X seller status unavailable';
-  for(const [key,symbol] of [['spcx','SPCX.X'],['tsla','TSLA.X'],['meta','META.X'],['coin','COIN.X'],['pltr','PLTR.X'],['amd','AMD.X'],['nvda','NVDA.X']]){
+  for(const [key,symbol] of [['spcx','SPCX.X'],['tsla','TSLA.X'],['meta','META.X'],['coin','COIN.X'],['pltr','PLTR.X'],['amd','AMD.X'],['nvda','NVDA.X'],['aapl','AAPL.X']]){
     const worker=data[key+'_seller'];
     $('start-'+key+'-seller').disabled=stockStarting.has(key)||!sessionReady||!worker||worker.running!==false||worker.halted;
     $('start-'+key+'-seller').textContent=stockStarting.has(key)?'Starting…':worker?.running?symbol+' → XNT · Running':worker?.halted?symbol+' seller halted':'Sell '+symbol+' → XNT';
@@ -176,7 +176,7 @@ function render(data) {
   $('wallet').href='https://explorer.mainnet.x1.xyz/address/'+encodeURIComponent(wallet);
   const running=data.seller_running, j=data.journal, runtime=data.runtime;
   const runningCount=Object.values(workers).filter(w=>w.running===true).length;
-  const unknownWorkers=['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda'].some(key=>workers[key]?.running==null);
+  const unknownWorkers=['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda','aapl'].some(key=>workers[key]?.running==null);
   badge('engine-badge',runningCount?runningCount+' script'+(runningCount===1?'':'s')+' running':unknownWorkers?'Script status unknown':'All scripts stopped',runningCount?'good':unknownWorkers?'warn':'');
   $('engine-detail').textContent='Individual status and Stop controls below';
   const visibleErrors=data.errors.filter(message=>message!=='Reference price unavailable or stale.');
@@ -216,7 +216,7 @@ function render(data) {
 }
 async function refresh(schedule=true){
   try {const response=await fetch('/api/status',{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!response.ok)throw Error('status');const data=await response.json();sessionReady=true;render(data);}
-  catch { purchaseMessage('Dashboard disconnected. Purchase status may be stale.',true);$('stock-purchase-alerts').textContent='Cannot check purchase or bridge progress while the dashboard is disconnected.';$('stock-purchase-alerts').hidden=false; for(const id of ['spy-value','spcx-value','tsla-value','meta-value','coin-value','pltr-value','amd-value','nvda-value','aapl-value','googl-strategy-value','googl-wallet-value','remaining-value','usdc-value'])$(id).textContent='Estimated value: —';previewFingerprint='';$('overview-cards').replaceChildren(); for(const key of ['meta','coin','pltr','amd','nvda','aapl']){badge(key+'-status','Disconnected','bad');$(key+'-gap').textContent='—';} badge('proceeds-status','Disconnected','bad'); badge('bridge-status','Disconnected','bad'); badge('settlement-status','Disconnected','bad'); badge('googl-strategy-status','Disconnected','bad'); badge('timeline-status','Disconnected','bad'); badge('rail-automation-status','Disconnected','bad'); $('proceeds-metric-note').textContent='Last known receipts · dashboard disconnected';$('strategy-count-note').textContent='Last known script count · dashboard disconnected';$('usdc-note').textContent='Last known wallet balance · dashboard disconnected';$('recent-empty').textContent='Dashboard disconnected; recent activity may be stale.'; for(const key of ['spcx','tsla','meta','coin','pltr','amd','nvda'])$('start-'+key+'-seller').disabled=true; badge('tsla-status','Disconnected','bad'); $('tsla-gap').textContent='—'; badge('spcx-status','Disconnected','bad'); $('spcx-gap').textContent='—'; $('start-auto-convert').disabled=true; badge('terminal-status','Disconnected','bad'); for(const key of ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda']){$('stop-'+key).disabled=true;badge('worker-'+key+'-badge','Unknown','warn');} $('stop-all').disabled=true; badge('auto-convert-badge','Disconnected','bad'); $('start-spy-seller').disabled=true; badge('spy-status','Disconnected','bad'); $('spy-gap').textContent='—'; $('start-seller').disabled=true; sessionReady=false; $('connection').textContent='Dashboard disconnected'; $('errors').hidden=false; $('errors').textContent='Connection lost. Displayed values may be out of date.';badge('freshness','Disconnected','bad');badge('engine-badge','Status unknown','warn'); }
+  catch { purchaseMessage('Dashboard disconnected. Purchase status may be stale.',true);$('stock-purchase-alerts').textContent='Cannot check purchase or bridge progress while the dashboard is disconnected.';$('stock-purchase-alerts').hidden=false; for(const id of ['spy-value','spcx-value','tsla-value','meta-value','coin-value','pltr-value','amd-value','nvda-value','aapl-value','googl-strategy-value','googl-wallet-value','remaining-value','usdc-value'])$(id).textContent='Estimated value: —';previewFingerprint='';$('overview-cards').replaceChildren(); for(const key of ['meta','coin','pltr','amd','nvda','aapl']){badge(key+'-status','Disconnected','bad');$(key+'-gap').textContent='—';} badge('proceeds-status','Disconnected','bad'); badge('bridge-status','Disconnected','bad'); badge('settlement-status','Disconnected','bad'); badge('googl-strategy-status','Disconnected','bad'); badge('timeline-status','Disconnected','bad'); badge('rail-automation-status','Disconnected','bad'); $('proceeds-metric-note').textContent='Last known receipts · dashboard disconnected';$('strategy-count-note').textContent='Last known script count · dashboard disconnected';$('usdc-note').textContent='Last known wallet balance · dashboard disconnected';$('recent-empty').textContent='Dashboard disconnected; recent activity may be stale.'; for(const key of ['spcx','tsla','meta','coin','pltr','amd','nvda','aapl'])$('start-'+key+'-seller').disabled=true; badge('tsla-status','Disconnected','bad'); $('tsla-gap').textContent='—'; badge('spcx-status','Disconnected','bad'); $('spcx-gap').textContent='—'; $('start-auto-convert').disabled=true; badge('terminal-status','Disconnected','bad'); for(const key of ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda','aapl']){$('stop-'+key).disabled=true;badge('worker-'+key+'-badge','Unknown','warn');} $('stop-all').disabled=true; badge('auto-convert-badge','Disconnected','bad'); $('start-spy-seller').disabled=true; badge('spy-status','Disconnected','bad'); $('spy-gap').textContent='—'; $('start-seller').disabled=true; sessionReady=false; $('connection').textContent='Dashboard disconnected'; $('errors').hidden=false; $('errors').textContent='Connection lost. Displayed values may be out of date.';badge('freshness','Disconnected','bad');badge('engine-badge','Status unknown','warn'); }
   if(!sessionReady)$('stock-purchase-confirm').disabled=true;
   if(schedule)setTimeout(refresh,5000);
 }
@@ -278,7 +278,7 @@ $('start-spy-seller').addEventListener('click',async()=>{
 async function stopScript(key){
   if(stopBusy || !sessionReady)return;
   stopBusy=true;
-  for(const name of ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda','all'])$('stop-'+name).disabled=true;
+  for(const name of ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda','aapl','all'])$('stop-'+name).disabled=true;
   $('script-stop-result').textContent=key==='all'?'Stopping all trading scripts…':'Stopping selected script…';
   try{
     const path=key==='all'?'/api/scripts/stop-all':'/api/scripts/'+key+'/stop';
@@ -289,7 +289,7 @@ async function stopScript(key){
   }catch{$('script-stop-result').textContent='Stop response unavailable. Check script status; stopping has not been confirmed.';}
   finally{stopBusy=false;}
 }
-for(const key of ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda','all'])$('stop-'+key).addEventListener('click',()=>stopScript(key));
+for(const key of ['googl','spy','spcx','tsla','conversion','bridge','meta','coin','pltr','amd','nvda','aapl','all'])$('stop-'+key).addEventListener('click',()=>stopScript(key));
 
 let terminalEvents=[], terminalFilter='all', terminalIds=new Set(), terminalCheckedAt=null;
 function renderTerminal(activity, now){
@@ -303,7 +303,7 @@ function renderTerminal(activity, now){
     if(terminalIds.has(event.id))continue;
     const row=document.createElement('div');row.className='terminal-line '+event.level;row.dataset.eventId=event.id;
     const time=document.createElement('time');time.dateTime=new Date(event.at*1000).toISOString();time.textContent=new Date(event.at*1000).toLocaleString();
-    const source=document.createElement('span');source.className='terminal-source';source.textContent=({spy:'SPY.X',spcx:'SPCX.X',tsla:'TSLA.X',meta:'META.X',coin:'COIN.X',pltr:'PLTR.X',amd:'AMD.X',nvda:'NVDA.X',googl:'GOOGL.X',conversion:'XNT → USDC.X',bridge:'USDC.X → SOL',system:'SYSTEM'})[event.source]||'SYSTEM';
+    const source=document.createElement('span');source.className='terminal-source';source.textContent=({spy:'SPY.X',spcx:'SPCX.X',tsla:'TSLA.X',meta:'META.X',coin:'COIN.X',pltr:'PLTR.X',amd:'AMD.X',nvda:'NVDA.X',aapl:'AAPL.X',googl:'GOOGL.X',conversion:'XNT → USDC.X',bridge:'USDC.X → SOL',system:'SYSTEM'})[event.source]||'SYSTEM';
     const message=document.createElement('span');message.textContent=event.message;
     row.append(time,source,message);
     if(event.signature){const link=document.createElement('a');link.href='https://explorer.mainnet.x1.xyz/tx/'+encodeURIComponent(event.signature);link.target='_blank';link.rel='noopener noreferrer';link.textContent='View transaction ↗';message.append(' ',link);}
@@ -504,7 +504,7 @@ $('start-auto-convert').addEventListener('click',async()=>{
   finally{autoStarting=false;}
 });
 
-for(const key of ['spcx','tsla','meta','coin','pltr','amd','nvda'])$('start-'+key+'-seller').addEventListener('click',async()=>{
+for(const key of ['spcx','tsla','meta','coin','pltr','amd','nvda','aapl'])$('start-'+key+'-seller').addEventListener('click',async()=>{
   if(stockStarting.has(key)||!sessionReady||$('start-'+key+'-seller').disabled)return;
   stockStarting.add(key);$('start-'+key+'-seller').disabled=true;$(key+'-start-result').textContent='Starting live stock seller…';
   try{const r=await fetch('/api/'+key+'/seller/start',{method:'POST',signal:AbortSignal.timeout(15000)});const result=await r.json();$(key+'-start-result').textContent=result.message;}
@@ -634,7 +634,7 @@ function renderTimeline(activity,now,bridge){
   if(list.dataset.fingerprint===fingerprint)return;
   list.dataset.fingerprint=fingerprint;list.replaceChildren();
   if(!events.length){const item=document.createElement('li');item.className='muted';item.textContent=activity?'No finalized activity recorded yet.':'Activity feed unavailable.';list.append(item);return;}
-  const labels={spy:'SPY.X',spcx:'SPCX.X',tsla:'TSLA.X',meta:'META.X',coin:'COIN.X',pltr:'PLTR.X',amd:'AMD.X',nvda:'NVDA.X',googl:'GOOGL.X',conversion:'XNT → USDC.X',bridge:'USDC.X → Solana',system:'System'};
+  const labels={spy:'SPY.X',spcx:'SPCX.X',tsla:'TSLA.X',meta:'META.X',coin:'COIN.X',pltr:'PLTR.X',amd:'AMD.X',nvda:'NVDA.X',aapl:'AAPL.X',googl:'GOOGL.X',conversion:'XNT → USDC.X',bridge:'USDC.X → Solana',system:'System'};
   for(const event of events){
     const item=document.createElement('li');item.className='timeline-event '+(event.level||'');
     const marker=document.createElement('span');marker.className='timeline-marker';marker.setAttribute('aria-hidden','true');marker.textContent=event.level==='good'?'✓':event.level==='bad'?'!':'◷';

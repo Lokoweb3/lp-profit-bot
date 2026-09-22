@@ -106,9 +106,9 @@ def cycle(live=False):
 def locked_cycle(live=False):
     if not conversion.ready():
         return {'status':'WAITING_FOR_CONVERSION_FINALITY'}
-    from . import spcx_seller, tsla_seller, meta_seller, coin_seller, pltr_seller, amd_seller, nvda_seller
+    from . import spcx_seller, tsla_seller, meta_seller, coin_seller, pltr_seller, amd_seller, nvda_seller, aapl_seller
     sales={'entries':[]}
-    for key,module in (('spy',spy),('spcx',spcx_seller),('tsla',tsla_seller),('meta',meta_seller),('coin',coin_seller),('pltr',pltr_seller),('amd',amd_seller),('nvda',nvda_seller)):
+    for key,module in (('spy',spy),('spcx',spcx_seller),('tsla',tsla_seller),('meta',meta_seller),('coin',coin_seller),('pltr',pltr_seller),('amd',amd_seller),('nvda',nvda_seller),('aapl',aapl_seller)):
         journal=module.read_journal()
         if not module.reconcile(journal):
             return {'status':'WAITING_FOR_STOCK_FINALITY'}

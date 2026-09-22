@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 from solders.hash import Hash
 from solders.pubkey import Pubkey
-from lp_profit_bot import meta_seller,coin_seller,pltr_seller,amd_seller,nvda_seller
+from lp_profit_bot import meta_seller,coin_seller,pltr_seller,amd_seller,nvda_seller,aapl_seller
 from lp_profit_bot import stock_policy as p,spcx_seller,tsla_seller,spy_seller,native_swaps as n,seller as s,xnt_conversion as x,auto_convert as auto
 
 class StockPolicyTests(unittest.TestCase):
@@ -20,13 +20,13 @@ class StockPolicyTests(unittest.TestCase):
                         'observation':str(Pubkey.new_unique())}}
 
     def test_approved_mints_and_buffers_are_explicit(self):
-        self.assertEqual(set(p.STOCKS),{'spy','spcx','tsla','meta','coin','pltr','amd','nvda'})
+        self.assertEqual(set(p.STOCKS),{'spy','spcx','tsla','meta','coin','pltr','amd','nvda','aapl'})
         self.assertEqual(p.VALUATION_FACTOR,Decimal('.95'))
         self.assertIsNone(p.public_policy()['total_cap'])
         self.assertIsNone(p.public_policy()['per_trade_cap'])
 
     def test_new_sellers_use_own_mint_and_pool_without_amount_caps(self):
-        for key,module in [('spcx',spcx_seller),('tsla',tsla_seller),('meta',meta_seller),('coin',coin_seller),('pltr',pltr_seller),('amd',amd_seller),('nvda',nvda_seller)]:
+        for key,module in [('spcx',spcx_seller),('tsla',tsla_seller),('meta',meta_seller),('coin',coin_seller),('pltr',pltr_seller),('amd',amd_seller),('nvda',nvda_seller),('aapl',aapl_seller)]:
             snap=self.snapshot(key);plan=module.plan(snap,Decimal('350'))
             self.assertEqual(plan['amount_raw'],snap['balance_in'])
             self.assertGreaterEqual(plan['minimum_output_raw'],module.minimum_output(plan['amount_raw'],Decimal('350'),snap['xnt_usd']))
@@ -43,7 +43,7 @@ class StockPolicyTests(unittest.TestCase):
 
     def test_journals_are_separate_and_mint_bound(self):
         self.assertNotEqual(spcx_seller.STATE,tsla_seller.STATE)
-        for key,module in [('spcx',spcx_seller),('tsla',tsla_seller),('meta',meta_seller),('coin',coin_seller),('pltr',pltr_seller),('amd',amd_seller),('nvda',nvda_seller)]:
+        for key,module in [('spcx',spcx_seller),('tsla',tsla_seller),('meta',meta_seller),('coin',coin_seller),('pltr',pltr_seller),('amd',amd_seller),('nvda',nvda_seller),('aapl',aapl_seller)]:
             with tempfile.TemporaryDirectory() as tmp:
                 file=Path(tmp)/'journal.json';j=module.read_journal(file)
                 self.assertEqual(j['mint'],p.STOCKS[key].mint)
@@ -69,7 +69,7 @@ class StockPolicyTests(unittest.TestCase):
         with self.assertRaises(s.SellerError):auto.accounting(sales,{'entries':[]},cache)
 
     def test_new_worker_does_not_sign_when_no_inventory(self):
-        for key,module in [('spcx',spcx_seller),('tsla',tsla_seller),('meta',meta_seller),('coin',coin_seller),('pltr',pltr_seller),('amd',amd_seller),('nvda',nvda_seller)]:
+        for key,module in [('spcx',spcx_seller),('tsla',tsla_seller),('meta',meta_seller),('coin',coin_seller),('pltr',pltr_seller),('amd',amd_seller),('nvda',nvda_seller),('aapl',aapl_seller)]:
             snap=self.snapshot(key);snap['balance_in']=0
             with patch.object(x,'ready',return_value=True),patch.object(x,'stock_sales_ready',return_value=True), \
                  patch.object(module,'read_journal',return_value={'entries':[],'halted':False}), \
@@ -81,7 +81,7 @@ class StockPolicyTests(unittest.TestCase):
     def test_snapshot_retains_requested_stock_mint(self):
         import hashlib,struct
         from lp_profit_bot import spy_quotes
-        for key in ('spcx','tsla','meta','coin','pltr','amd','nvda'):
+        for key in ('spcx','tsla','meta','coin','pltr','amd','nvda','aapl'):
             stock=p.STOCKS[key]
             pool={'config':s.CONFIG,'vaults':['a','b'],'mints':[s.WXNT,stock.mint],
                   'programs':[spy_quotes.LEGACY_TOKEN,s.TOKEN],'decimals':[9,8],

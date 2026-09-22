@@ -9,7 +9,7 @@ from lp_profit_bot import dashboard as d,stock_policy as p,stock_references as r
 from lp_profit_bot.ninja import NinjaError
 from tests.test_dashboard import DashboardHTTPTests
 
-KEYS=('meta','coin','pltr','amd','nvda')
+KEYS=('meta','coin','pltr','amd','nvda','aapl')
 
 class AddedStockTests(unittest.TestCase):
     def test_registry_routes_mints_and_shared_lock(self):

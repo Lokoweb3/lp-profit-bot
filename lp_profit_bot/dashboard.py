@@ -343,6 +343,41 @@ def start_nvda_seller():
             process.wait()
         raise seller.SellerError("Seller startup timed out. Check state/nvda-seller-dashboard.log.")
 
+def start_aapl_seller():
+    from . import aapl_seller
+    """Serialize launches across dashboard instances; seller also holds its own lock."""
+    state = seller.ROOT / "state"
+    seller.ensure_private_state_dir(state)
+    with START_LOCK, seller.open_state_lock(state / "aapl-dashboard-start.lock") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if seller_running('aapl-seller.lock'):
+            return "Seller already running; no additional process started."
+        journal = aapl_seller.read_journal()
+        if journal["halted"]:
+            raise seller.SellerError("Seller halted. Review its journal before restarting.")
+        with (state / "aapl-seller-dashboard.log").open("ab") as log:
+            process = subprocess.Popen(
+                [sys.executable, "-m", "lp_profit_bot.aapl_seller", "--live", "--watch"],
+                cwd=seller.ROOT, stdin=subprocess.DEVNULL, stdout=log,
+                stderr=subprocess.STDOUT, start_new_session=True,
+            )
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise seller.SellerError("Seller exited. Check state/aapl-seller-dashboard.log.")
+            if seller_running('aapl-seller.lock'):
+                threading.Thread(target=process.wait, daemon=True).start()
+                return "Live seller started: AAPL.X → XNT. It waits for qualifying prices."
+            time.sleep(0.05)
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        raise seller.SellerError("Seller startup timed out. Check state/aapl-seller-dashboard.log.")
+
+
 
 def start_auto_conversion():
     from . import xnt_conversion
@@ -761,6 +796,18 @@ class DashboardData:
         except Exception:
             data['nvda_seller'] = None
         try:
+            from . import aapl_seller
+            journal = aapl_seller.read_journal()
+            reserved = sum(row['amount_raw'] for row in journal['entries'])
+            confirmed = sum(row['amount_raw'] for row in journal['entries'] if row['status']=='finalized')
+            runtime, _ = read_public_file('aapl-seller-runtime.json')
+            data['aapl_seller'] = {'running': seller_running('aapl-seller.lock'),
+                'reserved': str(Decimal(reserved)/10**8), 'confirmed': str(Decimal(confirmed)/10**8),
+                'remaining': None, 'amount_policy': 'available_inventory',
+                'halted':journal['halted'], 'status': runtime.get('status') if isinstance(runtime,dict) else None}
+        except Exception:
+            data['aapl_seller'] = None
+        try:
             from . import xnt_conversion
             rows = xnt_conversion.read_journal()['entries']
             data['xnt_conversions'] = [{key: row.get(key) for key in
@@ -854,7 +901,7 @@ def handler_for(data, port):
                 self.send_error(403)
                 return
             stop_routes = {'/api/scripts/googl/stop': 'googl', '/api/scripts/spy/stop': 'spy',
-                           '/api/scripts/conversion/stop': 'conversion', '/api/scripts/bridge/stop': 'bridge', '/api/scripts/spcx/stop': 'spcx', '/api/scripts/tsla/stop': 'tsla', '/api/scripts/meta/stop': 'meta', '/api/scripts/coin/stop': 'coin', '/api/scripts/pltr/stop': 'pltr', '/api/scripts/amd/stop': 'amd', '/api/scripts/nvda/stop': 'nvda', '/api/scripts/stop-all': 'all'}
+                           '/api/scripts/conversion/stop': 'conversion', '/api/scripts/bridge/stop': 'bridge', '/api/scripts/spcx/stop': 'spcx', '/api/scripts/tsla/stop': 'tsla', '/api/scripts/meta/stop': 'meta', '/api/scripts/coin/stop': 'coin', '/api/scripts/pltr/stop': 'pltr', '/api/scripts/amd/stop': 'amd', '/api/scripts/nvda/stop': 'nvda', '/api/scripts/aapl/stop': 'aapl', '/api/scripts/stop-all': 'all'}
             if self.path in stop_routes:
                 try:
                     with START_LOCK:
@@ -984,11 +1031,12 @@ def handler_for(data, port):
                 except Exception:
                     self.respond(json.dumps({'message': 'Stock purchase or bridge unavailable. Check the journal and transaction status before retrying.'}).encode(), 'application/json', 500)
                 return
-            if self.path not in ("/api/seller/start", "/api/spy/seller/start", "/api/conversion/start", "/api/spcx/seller/start", "/api/tsla/seller/start", "/api/meta/seller/start", "/api/coin/seller/start", "/api/pltr/seller/start", "/api/amd/seller/start", "/api/nvda/seller/start"):
+            if self.path not in ("/api/seller/start", "/api/spy/seller/start", "/api/conversion/start", "/api/spcx/seller/start", "/api/tsla/seller/start", "/api/meta/seller/start", "/api/coin/seller/start", "/api/pltr/seller/start", "/api/amd/seller/start", "/api/nvda/seller/start", "/api/aapl/seller/start"):
                 self.send_error(404)
                 return
             try:
-                message = (start_nvda_seller() if self.path == "/api/nvda/seller/start" else
+                message = (start_aapl_seller() if self.path == "/api/aapl/seller/start" else
+                           start_nvda_seller() if self.path == "/api/nvda/seller/start" else
                            start_meta_seller() if self.path == "/api/meta/seller/start" else
                            start_coin_seller() if self.path == "/api/coin/seller/start" else
                            start_pltr_seller() if self.path == "/api/pltr/seller/start" else

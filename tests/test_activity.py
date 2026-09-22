@@ -4,7 +4,7 @@ from lp_profit_bot import activity as a
 
 class ActivityTests(unittest.TestCase):
     def setUp(self):
-        for module in (a.spcx_seller,a.tsla_seller,a.meta_seller,a.coin_seller,a.pltr_seller,a.amd_seller,a.nvda_seller):
+        for module in (a.spcx_seller,a.tsla_seller,a.meta_seller,a.coin_seller,a.pltr_seller,a.amd_seller,a.nvda_seller,a.aapl_seller):
             p=patch.object(module,'read_journal',return_value={'entries':[]});p.start();self.addCleanup(p.stop)
         p=patch.object(a.auto_bridge,'read_journal',return_value={'entries':[]});p.start();self.addCleanup(p.stop)
 

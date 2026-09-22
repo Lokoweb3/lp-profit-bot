@@ -17,6 +17,7 @@ WORKERS = {
     'pltr': ('PLTR.X → XNT', 'lp_profit_bot.pltr_seller', 'pltr-seller.lock', 'pltr-seller-runtime.json'),
     'amd': ('AMD.X → XNT', 'lp_profit_bot.amd_seller', 'amd-seller.lock', 'amd-seller-runtime.json'),
     'nvda': ('NVDA.X → XNT', 'lp_profit_bot.nvda_seller', 'nvda-seller.lock', 'nvda-seller-runtime.json'),
+    'aapl': ('AAPL.X → XNT', 'lp_profit_bot.aapl_seller', 'aapl-seller.lock', 'aapl-seller-runtime.json'),
     'conversion': ('Stock proceeds → USDC.X', 'lp_profit_bot.auto_convert', 'auto-convert.lock', 'auto-convert-runtime.json'),
     'bridge': ('USDC.X → Solana USDC', 'lp_profit_bot.auto_bridge', 'auto-bridge.lock', 'auto-bridge-runtime.json'),
 }

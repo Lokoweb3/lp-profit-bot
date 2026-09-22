@@ -65,7 +65,8 @@ class BuyGooglBridgeTests(unittest.TestCase):
         with patch.object(flow.bridge, 'api', return_value=config):
             for asset in flow.ASSETS.values():
                 self.assertEqual(flow.bridge_token(asset)[1]['mint'], asset['sol_mint'])
-            config['x1']['tokens'][1]['mint'] = flow.ASSETS['googl']['x1_mint']
+            spy_token = next(token for token in config['x1']['tokens'] if token['symbol'] == 'SPY')
+            spy_token['mint'] = flow.ASSETS['googl']['x1_mint']
             with self.assertRaises(flow.s.SellerError):
                 flow.bridge_token(flow.ASSETS['spy'])
 

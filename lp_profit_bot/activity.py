@@ -1,5 +1,5 @@
 """Bounded public activity feed from worker status and transaction journals."""
-from . import meta_seller, coin_seller, pltr_seller, amd_seller, nvda_seller
+from . import meta_seller, coin_seller, pltr_seller, amd_seller, nvda_seller, aapl_seller
 from collections import deque
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -70,6 +70,7 @@ class ActivityFeed:
             ('pltr',pltr_seller.read_journal,10**8,'PLTR.X',10**9,'XNT'),
             ('amd',amd_seller.read_journal,10**8,'AMD.X',10**9,'XNT'),
             ('nvda',nvda_seller.read_journal,10**8,'NVDA.X',10**9,'XNT'),
+            ('aapl',aapl_seller.read_journal,10**8,'AAPL.X',10**9,'XNT'),
             ('conversion',xnt_conversion.read_journal,10**9,'XNT',10**6,'USDC.X')):
             try:
                 rows=reader()['entries'][-100:]
