@@ -121,6 +121,8 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertTrue(json.loads(self.request("/api/status")[1])["controls_unlocked"])
         status, page, headers = self.request('/')
         self.assertIn(b'id="stock-purchase"', page)
+        self.assertIn(b'id="wxnt-route-title"', page)
+        self.assertIn(b'J8Uev16V9jFxLRBSqvy78AcE5sxBh8Ax6gyGhwGMZYTE', page)
         self.assertNotIn(b'id="unlock-controls"', page)
         self.assertIn('HttpOnly', headers['Set-Cookie'])
         self.assertIn('SameSite=Strict', headers['Set-Cookie'])
