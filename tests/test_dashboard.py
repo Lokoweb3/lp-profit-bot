@@ -173,10 +173,13 @@ class DashboardHTTPTests(unittest.TestCase):
             self.assertTrue(json.loads(payload)['tracking_started'])
             self.assertEqual(self.request('/api/stock-purchase/confirm', 'POST', valid, confirm)[0], 409)
             self.assertEqual(cycle.call_args_list[0].args, (False, 'spy'))
-            self.assertEqual(cycle.call_args_list[0].kwargs, {'spend_raw':11_000_000,'repeat':True})
+            self.assertEqual(cycle.call_args_list[0].kwargs, {'spend_raw':11_000_000,'repeat':False})
             self.assertEqual(cycle.call_args_list[1].args, (True, 'spy', 1_350_000))
-            self.assertEqual(cycle.call_args_list[1].kwargs, {'spend_raw':11_000_000,'repeat':True})
-            watcher.assert_called_once_with('spy')
+            self.assertEqual(cycle.call_args_list[1].kwargs['spend_raw'],11_000_000)
+            self.assertFalse(cycle.call_args_list[1].kwargs['repeat'])
+            self.assertIsInstance(cycle.call_args_list[1].kwargs['barrier_generation'],int)
+            watcher.assert_called_once()
+            self.assertEqual(watcher.call_args.args[0],'spy')
 
     def test_stock_purchase_rechecks_journal_before_confirmation(self):
         from lp_profit_bot import buy_googl_bridge as flow
@@ -186,7 +189,7 @@ class DashboardHTTPTests(unittest.TestCase):
                    'quoted_stock': '0.014', 'minimum_stock': '0.0135',
                    'bridge_minimum_stock': '0.013'}
         with patch.object(flow, 'cycle', return_value=preview) as cycle, \
-             patch.object(flow, 'read_journal', side_effect=[{'stage': 'new'}, {'stage': 'swap_pending'}]), \
+             patch.object(flow, 'read_journal', side_effect=[{'stage': 'new'}, {'stage': 'new'}, {'stage': 'swap_pending'}]), \
              patch.object(flow, 'process_lock', return_value=nullcontext()), \
              patch.object(d, 'start_stock_purchase_watcher') as watcher:
             status, payload, _ = self.request('/api/stock-purchase/preview', 'POST', valid, json.dumps({'stock':'spy','amount':'11'}))
@@ -194,7 +197,31 @@ class DashboardHTTPTests(unittest.TestCase):
             quote_id = json.loads(payload)['quote_id']
             self.assertEqual(self.request('/api/stock-purchase/confirm', 'POST', valid,
                                           json.dumps({'quote_id':quote_id}))[0], 409)
-            cycle.assert_called_once_with(False, 'spy', spend_raw=11_000_000, repeat=True)
+            cycle.assert_called_once_with(False, 'spy', spend_raw=11_000_000, repeat=False)
+            watcher.assert_not_called()
+
+    def test_completed_during_preview_is_status_check_not_repeat_purchase(self):
+        from lp_profit_bot import buy_googl_bridge as flow
+        valid={'Origin':f'http://127.0.0.1:{self.port}','X-Dashboard-Token':self.token,
+               'Content-Type':'application/json'}
+        completed={'stage':'completed','swap_signature':'swap','bridge_signature':'bridge',
+                   'destination_signature':'receipt'}
+        with patch.object(flow,'read_journal',side_effect=[{'stage':'swap_pending'},completed,completed]), \
+             patch.object(flow,'read_history',return_value=[completed]), \
+             patch.object(flow,'cycle',side_effect=[{'status':'COMPLETED'}, {'status':'COMPLETED'}]) as cycle, \
+             patch.object(flow,'process_lock',return_value=nullcontext()), \
+             patch.object(d,'start_stock_purchase_watcher') as watcher:
+            status,payload,_=self.request('/api/stock-purchase/preview','POST',valid,
+                json.dumps({'stock':'spy','amount':'11'}))
+            self.assertEqual(status,200)
+            preview=json.loads(payload);self.assertEqual(preview['action'],'check_status')
+            status,payload,_=self.request('/api/stock-purchase/confirm','POST',valid,
+                json.dumps({'quote_id':preview['quote_id']}))
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(payload)['status'],'COMPLETED')
+            self.assertEqual(cycle.call_args_list[0].kwargs['repeat'],False)
+            self.assertEqual(cycle.call_args_list[1].kwargs['repeat'],False)
+            self.assertFalse(cycle.call_args_list[1].args[0])
             watcher.assert_not_called()
 
     def test_bridge_preview_and_confirm_require_token_and_single_use(self):
@@ -299,12 +326,12 @@ class SellerStartTests(unittest.TestCase):
         process.poll.return_value = None
         with tempfile.TemporaryDirectory() as tmp, patch.object(seller, 'ROOT', Path(tmp)), \
              patch.object(d.subprocess, 'Popen', return_value=process) as spawn:
-            self.assertTrue(d.start_stock_purchase_watcher('spy'))
+            self.assertTrue(d.start_stock_purchase_watcher('spy',7))
             self.assertEqual(spawn.call_args.args[0],
                              [d.sys.executable, '-m', 'lp_profit_bot.buy_stock_bridge',
-                              '--stock', 'spy', '--live', '--watch'])
+                              '--stock', 'spy', '--live', '--watch', '--barrier-generation', '7'])
             with self.assertRaises(seller.SellerError):
-                d.start_stock_purchase_watcher('unknown')
+                d.start_stock_purchase_watcher('unknown',7)
 
     def test_existing_seller_never_spawns(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(seller, "ROOT", Path(tmp)), \

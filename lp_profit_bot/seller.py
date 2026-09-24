@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
@@ -77,9 +77,15 @@ def require(condition, message):
 def rpc(method, params):
     request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
     try:
-        result = subprocess.run(["curl", "--fail", "--silent", "--show-error", "--max-time", "20",
-                                 RPC_URL, "-H", "Content-Type: application/json", "--data-binary", "@-"],
-                                input=request, text=True, capture_output=True, timeout=25, check=True)
+        if method == 'sendTransaction':
+            from . import execution_barrier
+            guard = execution_barrier.submission(None)
+        else:
+            guard = nullcontext()
+        with guard:
+            result = subprocess.run(["curl", "--fail", "--silent", "--show-error", "--max-time", "20",
+                                     RPC_URL, "-H", "Content-Type: application/json", "--data-binary", "@-"],
+                                    input=request, text=True, capture_output=True, timeout=25, check=True)
         payload = json.loads(result.stdout)
         require(isinstance(payload, dict) and "result" in payload and not payload.get("error"),
                 f"RPC {method} rejected the request")
@@ -463,6 +469,8 @@ def main():
     parser.add_argument("--watch", action="store_true", help="Repeat until stopped or halted")
     parser.add_argument("--interval", type=int, default=60)
     args = parser.parse_args()
+    from . import execution_barrier
+    execution_barrier.arm()
     if args.interval < 60:
         parser.error("--interval must be at least 60 seconds")
     print("LIVE seller enabled" if args.live else "SIMULATION ONLY: no signatures or broadcasts", flush=True)

@@ -9,6 +9,7 @@ import fcntl
 import json
 import re
 import struct
+import hashlib
 import time
 import urllib.parse
 import urllib.error
@@ -25,7 +26,7 @@ from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
-from . import seller as s, auto_bridge as bridge
+from . import seller as s, auto_bridge as bridge, execution_barrier
 from .stock_policy import STOCKS
 
 LOCK = s.ROOT/'state'/'googlx-buy-bridge.lock'
@@ -58,6 +59,10 @@ TOKEN_CLASSIC = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
 WSOL = 'So11111111111111111111111111111111111111112'
 JUPITER = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'
 COMPUTE = 'ComputeBudget111111111111111111111111111111'
+SYSTEM = bridge.SYSTEM
+LOOKUP_TABLE_PROGRAM = 'AddressLookupTab1e1111111111111111111111111'
+ROUTE = hashlib.sha256(b'global:route').digest()[:8]
+SHARED_ACCOUNTS_ROUTE = hashlib.sha256(b'global:shared_accounts_route').digest()[:8]
 DEFAULT_USDC_RAW = 11_000_000
 MIN_BRIDGE_RAW = 2_900_000
 MAX_SLIPPAGE_BPS = 50
@@ -183,7 +188,11 @@ def signer():
     return result
 
 
-def owner_balance(mint):
+def owner_balance(mint, token_account=None, program=TOKEN_2022):
+    if token_account is not None:
+        result = bridge.solana_rpc('getAccountInfo', [token_account,
+                                  {'encoding':'base64','commitment':'confirmed'}])['value']
+        return 0 if result is None else s.token_balance(result, mint, s.WALLET, program=program)
     result = bridge.solana_rpc('getTokenAccountsByOwner', [s.WALLET, {'mint':mint},
                                  {'encoding':'jsonParsed','commitment':'confirmed'}])['value']
     return sum(int(a['account']['data']['parsed']['info']['tokenAmount']['amount']) for a in result)
@@ -202,14 +211,112 @@ def transaction_receipt(signature, mint):
         return None
     s.require(tx['transaction']['signatures'][0] == signature and tx['meta']['err'] is None,
               'Solana transaction failed; manual review required')
+    program = TOKEN_CLASSIC if mint == USDC else TOKEN_2022
+    expected = associated(mint, program)
+    raw_keys = tx['transaction']['message']['accountKeys']
+    keys = [entry.get('pubkey') if isinstance(entry,dict) else entry for entry in raw_keys]
+    loaded = tx['meta'].get('loadedAddresses') or {}
+    keys += loaded.get('writable',[]) + loaded.get('readonly',[])
+    s.require(expected in keys, 'Expected token account missing from receipt')
+    account_index = keys.index(expected)
     def balance(field):
-        return sum(int(a['uiTokenAmount']['amount']) for a in tx['meta'].get(field, [])
-                   if a.get('owner') == s.WALLET and a.get('mint') == mint)
+        rows = [a for a in tx['meta'].get(field, []) if a.get('accountIndex') == account_index]
+        s.require(len(rows) <= 1 and all(a.get('owner') == s.WALLET and a.get('mint') == mint
+                  for a in rows), 'Receipt token account changed')
+        return int(rows[0]['uiTokenAmount']['amount']) if rows else 0
     return balance('postTokenBalances') - balance('preTokenBalances')
 
 
-def validate_swap_programs(message):
-    keys = [str(key) for key in message.account_keys]
+def resolved_message_keys(message):
+    static = [str(key) for key in message.account_keys]
+    writable, readonly = [], []
+    for lookup in getattr(message,'address_table_lookups',()):
+        result = bridge.solana_rpc('getAccountInfo',
+            [str(lookup.account_key), {'encoding':'base64','commitment':'confirmed'}])['value']
+        s.require(result is not None and result.get('owner') == LOOKUP_TABLE_PROGRAM and
+                  isinstance(result.get('data'),list) and len(result['data']) == 2 and
+                  result['data'][1] == 'base64','Jupiter address lookup table unavailable')
+        try:
+            raw=base64.b64decode(result['data'][0],validate=True)
+            s.require(len(raw)>=56 and (len(raw)-56)%32==0,'Invalid Jupiter address lookup table')
+            addresses=[str(Pubkey.from_bytes(raw[i:i+32])) for i in range(56,len(raw),32)]
+        except (ValueError,TypeError):
+            raise s.SellerError('Invalid Jupiter address lookup table') from None
+        s.require(all(type(i) is int and i < len(addresses) for i in
+                  tuple(lookup.writable_indexes)+tuple(lookup.readonly_indexes)),
+                  'Jupiter address lookup index invalid')
+        writable.extend(addresses[i] for i in lookup.writable_indexes)
+        readonly.extend(addresses[i] for i in lookup.readonly_indexes)
+    keys = static+writable+readonly
+    s.require(len(keys) <= 256 and len(set(keys)) == len(keys),
+              'Jupiter transaction has duplicate or excessive accounts')
+    return keys
+
+
+def _route_bounds(data):
+    s.require(len(data) >= 27 and data[:8] in (ROUTE,SHARED_ACCOUNTS_ROUTE),
+              'Unsupported Jupiter route instruction')
+    amount, quoted_out, slippage, platform_fee = struct.unpack('<QQHB',data[-19:])
+    s.require(amount > 0 and quoted_out > 0 and 0 <= slippage <= MAX_SLIPPAGE_BPS and
+              platform_fee == 0, 'Jupiter route bounds or fee changed')
+    return amount,quoted_out,slippage
+
+
+def validate_jupiter_transaction(message,q,asset,approved_minimum_raw):
+    keys=resolved_message_keys(message)
+    s.require(message.header.num_required_signatures == 1 and keys[0] == s.WALLET,
+              'Jupiter transaction signer changed')
+    source=associated(USDC,TOKEN_CLASSIC);destination=associated(asset['sol_mint'],TOKEN_2022)
+    found=0;compute_limit=200_000;compute_price=0
+    for ix in message.instructions:
+        s.require(ix.program_id_index < len(keys) and all(index < len(keys) for index in ix.accounts),
+                  'Jupiter instruction account index invalid')
+        program=keys[ix.program_id_index];accounts=[keys[index] for index in ix.accounts];data=bytes(ix.data)
+        if program == COMPUTE:
+            if len(data)==5 and data[0]==2:
+                compute_limit=struct.unpack('<I',data[1:])[0]
+                s.require(0 < compute_limit <= 1_400_000,'Jupiter compute limit exceeds policy')
+            elif len(data)==9 and data[0]==3:
+                compute_price=struct.unpack('<Q',data[1:])[0]
+            else:
+                s.require(False,'Unsupported Jupiter compute-budget instruction')
+            continue
+        if program != JUPITER:
+            if program == s.ATA:
+                expected_creates=([s.WALLET,destination,s.WALLET,asset['sol_mint'],SYSTEM,TOKEN_2022],
+                                  [s.WALLET,associated(WSOL,TOKEN_CLASSIC),s.WALLET,WSOL,SYSTEM,TOKEN_CLASSIC])
+                s.require(data == b'\x01' and len(accounts) == 6 and accounts in expected_creates,
+                          'Unexpected Jupiter associated-account setup')
+            else:
+                s.require(program == TOKEN_CLASSIC,
+                          'Unexpected Jupiter top-level program')
+            continue
+        amount,quoted_out,slippage=_route_bounds(data)
+        if data[:8] == ROUTE:
+            s.require(len(accounts) >= 6 and accounts[1:4] == [s.WALLET,source,destination] and
+                      accounts[5] == asset['sol_mint'],'Jupiter route accounts changed')
+            source_index,destination_index=ix.accounts[2],ix.accounts[3]
+        else:
+            s.require(len(accounts) >= 9 and accounts[2] == s.WALLET and accounts[3] == source and
+                      accounts[6] == destination and accounts[7] == USDC and
+                      accounts[8] == asset['sol_mint'],'Jupiter shared route accounts changed')
+            source_index,destination_index=ix.accounts[3],ix.accounts[6]
+        s.require(message.is_maybe_writable(source_index) and message.is_maybe_writable(destination_index),
+                  'Jupiter source or destination is not writable')
+        s.require(amount == int(q['inAmount']) and quoted_out == int(q['outAmount']) and
+                  slippage == int(q['slippageBps']),'Jupiter route differs from approved preview')
+        enforced=quoted_out*(10_000-slippage)//10_000
+        s.require(enforced >= int(q['otherAmountThreshold']) and enforced >= approved_minimum_raw,
+                  'Jupiter transaction does not enforce approved minimum output')
+        found += 1
+    s.require(found == 1,'Jupiter transaction must contain exactly one supported swap')
+    s.require((compute_limit*compute_price+999_999)//1_000_000 <= MAX_PRIORITY_LAMPORTS,
+              'Jupiter priority fee exceeds policy')
+    return keys
+
+
+def validate_swap_programs(message, keys=None):
+    keys = resolved_message_keys(message) if keys is None else keys
     programs = [keys[ix.program_id_index] for ix in message.instructions]
     allowed = {COMPUTE, s.ATA, JUPITER, TOKEN_CLASSIC}
     s.require(set(programs) <= allowed and JUPITER in programs,
@@ -248,22 +355,25 @@ def prepare_swap(q, asset=None, spend_raw=None):
     message = unsigned.message
     s.require(str(message.account_keys[0]) == s.WALLET and message.header.num_required_signatures == 1,
               'Jupiter transaction payer/signers changed')
-    if validate_swap_programs(message):
+    keys=validate_jupiter_transaction(message,q,asset,int(q['otherAmountThreshold']))
+    if validate_swap_programs(message,keys):
         wsol_ata = associated(WSOL, TOKEN_CLASSIC)
         account = bridge.solana_rpc('getAccountInfo',
             [wsol_ata, {'encoding':'base64','commitment':'confirmed'}])['value']
         s.require(account is None, 'Existing wrapped SOL account cannot be closed by this swap')
     s.require(str(message.account_keys[0]) == s.WALLET, 'Unexpected Jupiter fee payer')
-    before_usdc, before_stock = owner_balance(USDC), owner_balance(asset['sol_mint'])
+    input_ata = associated(USDC,TOKEN_CLASSIC)
+    output_ata = associated(asset['sol_mint'],TOKEN_2022)
+    before_usdc = owner_balance(USDC,input_ata,TOKEN_CLASSIC)
+    before_stock = owner_balance(asset['sol_mint'],output_ata,TOKEN_2022)
     native = bridge.solana_rpc('getBalance',[s.WALLET, {'commitment':'confirmed'}])['value']
     s.require(before_usdc >= spend_raw and native >= MAX_SOL_COST_LAMPORTS,
               'Insufficient Solana USDC or SOL reserve')
     # The output ATA does not exist yet; simulation must return its new balance.
     pub = Pubkey.from_string
-    output_ata = associated(asset['sol_mint'],TOKEN_2022)
     sim = bridge.solana_rpc('simulateTransaction', [base64.b64encode(bytes(unsigned)).decode(),
           {'encoding':'base64','sigVerify':False,'commitment':'confirmed',
-           'accounts':{'encoding':'base64','addresses':[associated(USDC,TOKEN_CLASSIC),output_ata,s.WALLET]}}])['value']
+           'accounts':{'encoding':'base64','addresses':[input_ata,output_ata,s.WALLET]}}])['value']
     s.require(sim['err'] is None and len(sim['accounts']) == 3, 'Swap simulation failed')
     usdc_after = s.token_balance(sim['accounts'][0], USDC, s.WALLET, program=TOKEN_CLASSIC)
     stock_after = s.token_balance(sim['accounts'][1], asset['sol_mint'], s.WALLET)
@@ -301,7 +411,7 @@ def build_bridge(amount_raw, source, token, asset=None):
 
 
 def cycle(live=False, asset_key='googl', approved_minimum_raw=None,
-          spend_raw=None, repeat=False):
+          spend_raw=None, repeat=False, barrier_generation=None):
     s.require(asset_key in ASSETS, 'Unsupported stock')
     asset = ASSETS[asset_key]
     row = read_journal(asset)
@@ -344,8 +454,9 @@ def cycle(live=False, asset_key='googl', approved_minimum_raw=None,
         row.update(stage='swap_pending',spend_raw=spend_raw,swap_signature=str(signed.signatures[0]),
                    quote_minimum_raw=int(q['otherAmountThreshold']),created_at=time.time())
         write_attempt(asset,row,append=new_round)
-        returned = bridge.solana_rpc('sendTransaction',[base64.b64encode(bytes(signed)).decode(),
-                    {'encoding':'base64','skipPreflight':False,'preflightCommitment':'confirmed','maxRetries':0}])
+        with execution_barrier.submission(barrier_generation):
+            returned = bridge.solana_rpc('sendTransaction',[base64.b64encode(bytes(signed)).decode(),
+                        {'encoding':'base64','skipPreflight':False,'preflightCommitment':'confirmed','maxRetries':0}])
         s.require(returned == row['swap_signature'],'Swap send signature mismatch; reservation retained')
         return dict(report,status='SWAP_PENDING',signature=returned)
     if row['stage'] == 'swap_pending':
@@ -369,13 +480,14 @@ def cycle(live=False, asset_key='googl', approved_minimum_raw=None,
         s.require(amount >= int(token['minAmount']) and
                   amount <= int(token['maxAmount']) and amount <= int(token['dailyCapRemaining']),
                   'Purchased stock no longer satisfies bridge limits')
-        s.require(owner_balance(asset['sol_mint']) >= amount, 'Purchased stock balance unavailable')
+        source_ata = associated(asset['sol_mint'],TOKEN_2022)
+        s.require(owner_balance(asset['sol_mint'],source_ata,TOKEN_2022) >= amount,
+                  'Purchased stock balance unavailable')
         if not live:
             return {'status':'BRIDGE_READY','asset':asset['symbol'],'stock_raw':amount}
         unsigned = build_bridge(amount,source,token,asset)
-        source_ata = associated(asset['sol_mint'],TOKEN_2022)
         native = bridge.solana_rpc('getBalance',[s.WALLET,{'commitment':'confirmed'}])['value']
-        balance = owner_balance(asset['sol_mint'])
+        balance = owner_balance(asset['sol_mint'],source_ata,TOKEN_2022)
         sim = bridge.solana_rpc('simulateTransaction',[base64.b64encode(bytes(unsigned)).decode(),
              {'encoding':'base64','sigVerify':False,'commitment':'confirmed',
               'accounts':{'encoding':'base64','addresses':[source_ata,s.WALLET]}}])['value']
@@ -387,8 +499,9 @@ def cycle(live=False, asset_key='googl', approved_minimum_raw=None,
         row.update(stage='bridge_pending',bridge_signature=str(signed.signatures[0]),
                    bridge_amount_raw=amount,bridge_submitted_at=time.time())
         write_attempt(asset,row)
-        returned = bridge.solana_rpc('sendTransaction',[base64.b64encode(bytes(signed)).decode(),
-                    {'encoding':'base64','skipPreflight':False,'preflightCommitment':'confirmed','maxRetries':0}])
+        with execution_barrier.submission(barrier_generation):
+            returned = bridge.solana_rpc('sendTransaction',[base64.b64encode(bytes(signed)).decode(),
+                        {'encoding':'base64','skipPreflight':False,'preflightCommitment':'confirmed','maxRetries':0}])
         s.require(returned == row['bridge_signature'],'Bridge send signature mismatch; reservation retained')
         return {'status':'BRIDGE_PENDING','signature':returned}
     if row['stage'] == 'bridge_pending':
@@ -449,15 +562,20 @@ def main():
                         help='Start another purchase after the previous bridge completed')
     parser.add_argument('--live',action='store_true',help='Sign and send the bounded purchase and bridge')
     parser.add_argument('--watch',action='store_true',help='After a live submission, track finality and complete the bridge')
+    parser.add_argument('--barrier-generation',type=int,default=None,help=argparse.SUPPRESS)
     args=parser.parse_args()
     if args.watch and not args.live:
         parser.error('--watch requires --live')
     amount_raw = parse_usdc_amount(args.amount)
+    supplied_generation = getattr(args,'barrier_generation',None)
+    barrier_generation = (execution_barrier.snapshot() if supplied_generation is None
+                          else supplied_generation)
     try:
         with process_lock():
             repeat = args.new_purchase
             while True:
-                result = cycle(args.live,args.stock,spend_raw=amount_raw,repeat=repeat)
+                result = cycle(args.live,args.stock,spend_raw=amount_raw,repeat=repeat,
+                               barrier_generation=barrier_generation)
                 repeat = False
                 print(json.dumps(result,indent=2),flush=True)
                 if not args.watch or result['status'] == 'COMPLETED':

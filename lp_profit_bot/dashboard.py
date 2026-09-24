@@ -20,7 +20,7 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import seller, worker_control
+from . import seller, worker_control, execution_barrier
 from .spy_monitor import snapshot as spy_snapshot
 from .spcx_monitor import snapshot as spcx_snapshot
 from .tsla_monitor import snapshot as tsla_snapshot
@@ -422,7 +422,7 @@ def read_public_file(name):
         return None, None
 
 
-def start_stock_purchase_watcher(asset_key):
+def start_stock_purchase_watcher(asset_key, barrier_generation):
     """Continue a confirmed, journaled Solana purchase and bridge in the background."""
     from . import buy_googl_bridge as flow
     seller.require(asset_key in flow.ASSETS, "Unsupported stock")
@@ -431,7 +431,8 @@ def start_stock_purchase_watcher(asset_key):
     with (state / f"{asset_key}-buy-bridge-dashboard.log").open("ab") as log:
         process = subprocess.Popen(
             [sys.executable, "-m", "lp_profit_bot.buy_stock_bridge", "--stock", asset_key,
-             "--live", "--watch"], cwd=seller.ROOT, stdin=subprocess.DEVNULL,
+             "--live", "--watch", "--barrier-generation", str(barrier_generation)],
+            cwd=seller.ROOT, stdin=subprocess.DEVNULL,
             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     threading.Thread(target=process.wait, daemon=True).start()
     return process.poll() is None
@@ -986,13 +987,20 @@ def handler_for(data, port):
                                        'Choose a supported stock')
                         spend_raw = flow.parse_usdc_amount(body.get('amount'))
                         with flow.process_lock():
-                            result = flow.cycle(False, asset_key, spend_raw=spend_raw, repeat=True)
+                            before = flow.read_journal(flow.ASSETS[asset_key])['stage']
+                            result = flow.cycle(False, asset_key, spend_raw=spend_raw,
+                                                repeat=before == 'completed')
                             stage = flow.read_journal(flow.ASSETS[asset_key])['stage']
                             attempt_count = len(flow.read_history(flow.ASSETS[asset_key]))
+                        action = ('new_purchase' if result['status'] == 'SWAP_READY' and
+                                  stage in ('new', 'completed') else
+                                  'resume_bridge' if result['status'] == 'BRIDGE_READY' and
+                                  stage == 'swap_finalized' else 'check_status')
                         preview = {'asset': asset_key, 'stage': stage, 'spend_raw': spend_raw,
-                                   'attempt_count': attempt_count,
+                                   'attempt_count': attempt_count, 'action': action,
+                                   'barrier_generation': execution_barrier.snapshot(),
                                    'minimum_output_raw': int(Decimal(result['minimum_stock'])*10**8)
-                                   if result['status'] == 'SWAP_READY' else None,
+                                   if action == 'new_purchase' else None,
                                    'expires_at': time.time()+30}
                         quote_id = secrets.token_urlsafe(24)
                         if stage != 'failed':
@@ -1003,7 +1011,8 @@ def handler_for(data, port):
                                 seller.require(len(stock_purchase_quotes) < 100,
                                                'Too many pending stock previews')
                                 stock_purchase_quotes[quote_id] = preview
-                        result = dict(result, stock=asset_key, expires_at=preview['expires_at'],
+                        result = dict(result, stock=asset_key, action=action,
+                                      expires_at=preview['expires_at'],
                                       quote_id=quote_id if stage != 'failed' else None)
                     else:
                         with quote_lock:
@@ -1016,13 +1025,27 @@ def handler_for(data, port):
                             seller.require(current['stage'] == preview['stage'] and
                                            len(flow.read_history(flow.ASSETS[asset_key])) == preview['attempt_count'],
                                            'Stock bridge state changed; preview again')
-                            result = flow.cycle(True, asset_key, preview['minimum_output_raw'],
-                                                spend_raw=preview['spend_raw'], repeat=True)
+                            action = preview['action']
+                            if action == 'new_purchase':
+                                seller.require(preview['minimum_output_raw'] is not None and
+                                               current['stage'] in ('new', 'completed'),
+                                               'Fresh purchase preview required')
+                                result = flow.cycle(True, asset_key, preview['minimum_output_raw'],
+                                    spend_raw=preview['spend_raw'], repeat=current['stage']=='completed',
+                                    barrier_generation=preview['barrier_generation'])
+                            elif action == 'resume_bridge':
+                                seller.require(current['stage'] == 'swap_finalized',
+                                               'Bridge state changed; preview again')
+                                result = flow.cycle(True, asset_key, repeat=False,
+                                    barrier_generation=preview['barrier_generation'])
+                            else:
+                                result = flow.cycle(False, asset_key, repeat=False)
                         result = dict(result, stock=asset_key)
-                        if result['status'] in ('SWAP_PENDING', 'BRIDGE_PENDING',
+                        if action in ('new_purchase', 'resume_bridge') and result['status'] in ('SWAP_PENDING', 'BRIDGE_PENDING',
                                                 'WAITING_FOR_X1_RECEIPT'):
                             try:
-                                result['tracking_started'] = start_stock_purchase_watcher(asset_key)
+                                result['tracking_started'] = start_stock_purchase_watcher(
+                                    asset_key, preview['barrier_generation'])
                             except OSError:
                                 result['tracking_started'] = False
                     self.respond(json.dumps(result).encode(), 'application/json')

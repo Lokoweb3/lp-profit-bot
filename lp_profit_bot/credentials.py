@@ -1,6 +1,7 @@
 """Local API credential storage, excluded from version control."""
 
 import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -15,7 +16,15 @@ def load_key() -> str:
     if key:
         return key
     try:
-        return KEY_FILE.read_text(encoding="utf-8").strip()
+        if KEY_FILE.parent.is_symlink():
+            raise NinjaError("Credential directory must not be a symbolic link.")
+        fd = os.open(KEY_FILE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "r", encoding="utf-8") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or
+                    stat.S_IMODE(info.st_mode) != 0o600):
+                raise NinjaError("API key file must be a regular file owned by your user with permissions 600.")
+            return stream.read(8192).strip()
     except FileNotFoundError:
         return ""
     except (OSError, UnicodeError):
@@ -32,6 +41,8 @@ def save_key(key: str) -> None:
         if directory.is_symlink():
             raise NinjaError("Credential directory must not be a symbolic link.")
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory.stat().st_uid != os.getuid():
+            raise NinjaError("Credential directory must belong to your user.")
         directory.chmod(0o700)
         # A new private file plus atomic replacement also safely updates old keys.
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
