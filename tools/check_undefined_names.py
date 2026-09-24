@@ -3,12 +3,15 @@
 import builtins
 import dis
 import importlib
+import os
 import pkgutil
 import types
 from pathlib import Path
 import sys
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+# Import modules without depending on a developer's local wallet file.
+os.environ.setdefault('X1_BOT_WALLET_ADDRESS','3qbR1eZRqXUWroWKKYhbDmR3FfqTHfqSU8zZSxtANzYh')
 import lp_profit_bot
 
 

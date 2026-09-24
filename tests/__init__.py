@@ -2,4 +2,5 @@
 
 import os
 
-os.environ.setdefault("X1_BOT_WALLET_ADDRESS", "11111111111111111111111111111111")
+# Deterministic test-only pubkey (32 bytes of 0x2a); never use a real wallet here.
+os.environ.setdefault("X1_BOT_WALLET_ADDRESS", "3qbR1eZRqXUWroWKKYhbDmR3FfqTHfqSU8zZSxtANzYh")
