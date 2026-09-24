@@ -200,6 +200,8 @@ def main():
     parser.add_argument('--live',action='store_true')
     parser.add_argument('--watch',action='store_true')
     args=parser.parse_args()
+    from . import execution_barrier
+    execution_barrier.arm()
     print('META.X: no total or per-trade amount cap; available inventory only; native XNT proceeds; '+('LIVE' if args.live else 'SIMULATION'),flush=True)
     try:
         with process_lock():

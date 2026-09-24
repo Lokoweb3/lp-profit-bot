@@ -1,6 +1,8 @@
 """Explicitly confirmed XNT -> USDC.X conversions with durable send reservation."""
 import json
+import fcntl
 import time
+from contextlib import contextmanager, nullcontext
 from decimal import Decimal
 from solders.keypair import Keypair
 from solders.signature import Signature
@@ -10,9 +12,17 @@ from . import seller as s, native_swaps as swaps
 from .spy_seller import native_lock, read_journal as spy_journal, reconcile as reconcile_spy
 
 STATE = s.ROOT/'state'/'xnt-conversion-journal.json'
+JOURNAL_LOCK = s.ROOT/'state'/'xnt-conversion-journal.lock'
 
 
-def read_journal():
+@contextmanager
+def journal_lock():
+    with s.open_state_lock(JOURNAL_LOCK) as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX)
+        yield
+
+
+def _read_journal():
     if not STATE.exists() and not STATE.is_symlink():
         return {'wallet':s.WALLET,'entries':[]}
     j=s.read_state_json(STATE)
@@ -25,20 +35,26 @@ def read_journal():
     return j
 
 
+def read_journal():
+    with journal_lock():
+        return _read_journal()
+
+
 def ready():
-    journal=read_journal()
-    changed=False
-    for row in journal['entries']:
-        if row['status']!='pending':
-            continue
-        value=s.rpc('getSignatureStatuses',[[row['signature']],{'searchTransactionHistory':True}])['value'][0]
-        if value is None or value.get('confirmationStatus')!='finalized':
-            return False
-        row['status']='failed' if value['err'] is not None else 'finalized'
-        changed=True
-    if changed:
-        s.atomic_write(STATE,journal)
-    return True
+    with journal_lock():
+        journal=_read_journal()
+        changed=False
+        for row in journal['entries']:
+            if row['status']!='pending':
+                continue
+            value=s.rpc('getSignatureStatuses',[[row['signature']],{'searchTransactionHistory':True}])['value'][0]
+            if value is None or value.get('confirmationStatus')!='finalized':
+                return False
+            row['status']='failed' if value['err'] is not None else 'finalized'
+            changed=True
+        if changed:
+            s.atomic_write(STATE,journal)
+        return True
 
 
 def stock_sales_ready():
@@ -60,12 +76,15 @@ def amount_raw(text):
 
 
 def preview(text):
+    from . import execution_barrier
+    barrier_generation=execution_barrier.arm()
     amount=amount_raw(text)
     snap=swaps.xnt_snapshot()
     output,minimum=swaps.xnt_quote(snap,amount)
     return {'amount_raw':amount,'minimum_raw':minimum,'amount_xnt':str(Decimal(amount)/10**9),
             'estimated_usdc':str(Decimal(output)/10**6),'minimum_usdc':str(Decimal(minimum)/10**6),
-            'expires_at':time.time()+30,'cost_allowance_xnt':'0.01'}
+            'expires_at':time.time()+30,'cost_allowance_xnt':'0.01',
+            'barrier_generation':barrier_generation}
 
 
 def execute(quote):
@@ -89,12 +108,19 @@ def execute_locked(quote, *, source="manual", native_floor=0):
     signer=Keypair.from_seed(seed)
     s.require(str(signer.pubkey())==s.WALLET,'Signing wallet mismatch')
     signed=VersionedTransaction(unsigned.message,[signer]); signature=str(signed.signatures[0])
-    journal=read_journal()
-    journal['entries'].append({'signature':signature,'amount_raw':quote['amount_raw'],
-         'minimum_output_raw':quote['minimum_raw'],'status':'pending','created_at':time.time(),
-         'last_valid_block_height':block['lastValidBlockHeight'],'source':source})
-    s.atomic_write(STATE,journal)
-    returned=s.rpc('sendTransaction',[s.encoded(signed),{'encoding':'base64','skipPreflight':False,
-         'preflightCommitment':'confirmed','minContextSlot':slot,'maxRetries':0}])
+    with journal_lock():
+        journal=_read_journal()
+        s.require(not any(row['status']=='pending' for row in journal['entries']),
+                  'Previous XNT conversion is pending; no duplicate will be sent')
+        journal['entries'].append({'signature':signature,'amount_raw':quote['amount_raw'],
+             'minimum_output_raw':quote['minimum_raw'],'status':'pending','created_at':time.time(),
+             'last_valid_block_height':block['lastValidBlockHeight'],'source':source})
+        s.atomic_write(STATE,journal)
+    from . import execution_barrier
+    context = (execution_barrier.authorize(quote['barrier_generation'])
+               if 'barrier_generation' in quote else nullcontext())
+    with context:
+        returned=s.rpc('sendTransaction',[s.encoded(signed),{'encoding':'base64','skipPreflight':False,
+             'preflightCommitment':'confirmed','minContextSlot':slot,'maxRetries':0}])
     s.require(returned==signature,'RPC signature mismatch; reservation remains pending')
     return {'signature':signature,'message':'Conversion submitted. Awaiting finality.'}

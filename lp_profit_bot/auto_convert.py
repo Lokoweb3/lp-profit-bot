@@ -52,9 +52,9 @@ def receipt(row, kind):
 
 
 def load_cache():
-    if not CACHE.exists():
+    if not CACHE.exists() and not CACHE.is_symlink():
         return {'wallet':s.WALLET,'receipts':{}}
-    data=json.loads(CACHE.read_text())
+    data=s.read_state_json(CACHE)
     s.require(data['wallet']==s.WALLET and isinstance(data['receipts'],dict),'Invalid proceeds cache')
     return data
 
@@ -149,6 +149,8 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live',action='store_true');parser.add_argument('--watch',action='store_true')
     args=parser.parse_args()
+    from . import execution_barrier
+    execution_barrier.arm()
     try:
         with process_lock():
             while True:

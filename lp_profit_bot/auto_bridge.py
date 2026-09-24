@@ -13,7 +13,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from decimal import Decimal
 
 from cryptography.hazmat.primitives import serialization
@@ -205,7 +205,7 @@ def build(amount, slot, blockhash, fee_account, fee_collector):
 
 @contextmanager
 def transaction_lock():
-    TX_s.ensure_private_state_dir(LOCK.parent)
+    s.ensure_private_state_dir(TX_LOCK.parent)
     with s.open_state_lock(TX_LOCK) as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
         yield
@@ -228,6 +228,8 @@ def amount_raw(text):
 
 
 def preview(text):
+    from . import execution_barrier
+    barrier_generation=execution_barrier.arm()
     amount = amount_raw(text)
     _, token = bridge_config()
     s.require(amount >= int(token['minAmount']) and amount <= int(token['maxAmount']) and
@@ -238,7 +240,8 @@ def preview(text):
     return {'amount_raw':amount, 'amount_usdc':str(Decimal(amount)/10**6),
             'fee_usdc':str(Decimal(fee)/10**6),
             'expected_usdc':str(Decimal(amount-fee)/10**6),
-            'destination':s.WALLET, 'expires_at':time.time()+30}
+            'destination':s.WALLET, 'expires_at':time.time()+30,
+            'barrier_generation':barrier_generation}
 
 
 def execute_manual(quote):
@@ -256,7 +259,8 @@ def execute_manual(quote):
                   'Bridge fee changed; preview again')
         balance = wallet_balance()
         s.require(balance >= amount, 'Insufficient USDC.X wallet balance')
-        return submit(journal, source, token, amount, balance, True, 'manual')
+        return submit(journal, source, token, amount, balance, True, 'manual',
+                      quote.get('barrier_generation'))
 
 
 def cycle(live=False):
@@ -284,7 +288,7 @@ def locked_cycle(live=False):
     return submit(journal, source, token, amount, balance, live, 'automatic')
 
 
-def submit(journal, source, token, amount, balance, live, kind):
+def submit(journal, source, token, amount, balance, live, kind, barrier_generation=None):
     native = s.rpc('getBalance', [s.WALLET, {'commitment':'confirmed'}])['value']
     s.require(native >= MAX_NATIVE_COST + 1_000_000, 'Insufficient XNT fee reserve')
     slot = s.rpc('getSlot', [{'commitment':'confirmed'}])
@@ -324,9 +328,13 @@ def submit(journal, source, token, amount, balance, live, kind):
                                'outgoing_message':outgoing, 'source':kind,
                                'fee_raw':int(token['flatFeeAmount'])})
     s.atomic_write(STATE, journal)
-    returned = s.rpc('sendTransaction', [s.encoded(signed), {'encoding':'base64',
-                       'skipPreflight':False, 'preflightCommitment':'confirmed',
-                       'minContextSlot':simulation['context']['slot'], 'maxRetries':0}])
+    from . import execution_barrier
+    context = (execution_barrier.authorize(barrier_generation)
+               if barrier_generation is not None else nullcontext())
+    with context:
+        returned = s.rpc('sendTransaction', [s.encoded(signed), {'encoding':'base64',
+                           'skipPreflight':False, 'preflightCommitment':'confirmed',
+                           'minContextSlot':simulation['context']['slot'], 'maxRetries':0}])
     s.require(returned == signature, 'Bridge RPC signature mismatch; reservation retained')
     return dict(report, status='SUBMITTED_PENDING_FINALITY', signature=signature)
 
@@ -347,6 +355,8 @@ def main():
     parser.add_argument('--live', action='store_true', help='Sign and send bridge transactions')
     parser.add_argument('--watch', action='store_true', help='Repeat every 30 seconds')
     args = parser.parse_args()
+    from . import execution_barrier
+    execution_barrier.arm()
     with process_lock():
         while True:
             try:

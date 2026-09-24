@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import signal
 import time
-from . import seller
+from . import seller, execution_barrier
 
 WORKERS = {
     'googl': ('GOOGL.X → USDC.X', 'lp_profit_bot.seller', 'seller.lock', 'seller-runtime.json'),
@@ -20,6 +20,8 @@ WORKERS = {
     'aapl': ('AAPL.X → XNT', 'lp_profit_bot.aapl_seller', 'aapl-seller.lock', 'aapl-seller-runtime.json'),
     'conversion': ('Stock proceeds → USDC.X', 'lp_profit_bot.auto_convert', 'auto-convert.lock', 'auto-convert-runtime.json'),
     'bridge': ('USDC.X → Solana USDC', 'lp_profit_bot.auto_bridge', 'auto-bridge.lock', 'auto-bridge-runtime.json'),
+    'buy_stock_bridge': ('Stock purchase/bridge watcher', 'lp_profit_bot.buy_stock_bridge', 'googlx-buy-bridge.lock', None),
+    'buy_googl_bridge': ('Legacy stock purchase/bridge watcher', 'lp_profit_bot.buy_googl_bridge', 'googlx-buy-bridge.lock', None),
 }
 
 
@@ -44,7 +46,7 @@ def status():
         except OSError:
             active = None
         try:
-            runtime = seller.read_state_json(seller.ROOT/'state'/filename)
+            runtime = seller.read_state_json(seller.ROOT/'state'/filename) if filename else {}
             fresh = isinstance(runtime,dict) and 0 <= time.time()-runtime.get('updated_at',0) <= 120
         except (OSError, ValueError, TypeError):
             runtime, fresh = {}, False
@@ -103,6 +105,7 @@ def stop(key):
 
 
 def stop_all():
+    execution_barrier.stop()
     messages=[]; failures=[]
     for key in WORKERS:
         try:
